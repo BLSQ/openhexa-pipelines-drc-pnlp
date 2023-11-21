@@ -17,7 +17,7 @@ from openhexa.sdk import current_run, parameter, pipeline, workspace
 from openhexa.toolbox.dhis2 import DHIS2
 
 
-@pipeline("drc-pnlp-tdb", name="DRC PNLP TdB")
+@pipeline(code = "drc-pnlp-tdb", name="DRC PNLP TdB", timeout = 8 * 60 * 60)
 @parameter(
     "get_year",
     name="Year",
@@ -35,6 +35,14 @@ from openhexa.toolbox.dhis2 import DHIS2
     required=False,
 )
 @parameter(
+    "get_run_notebooks",
+    name="Process data",
+    help="Whether or not to push the processed results to the dashboard DB",
+    type=bool,
+    default=True,
+    required=False,
+)
+@parameter(
     "get_upload",
     name="Upload?",
     help="Whether or not to push the processed results to the dashboard DB",
@@ -42,7 +50,13 @@ from openhexa.toolbox.dhis2 import DHIS2
     default=False,
     required=False,
 )
-def pnlp_extract_process(get_year, get_upload, get_download, *args, **kwargs):
+def pnlp_extract_process(
+    get_year, 
+    get_download, 
+    get_run_notebooks,
+    get_upload,
+    *args, 
+    **kwargs):
     """
     """
 
@@ -78,20 +92,21 @@ def pnlp_extract_process(get_year, get_upload, get_download, *args, **kwargs):
 
     # run processing code in notebook
     params = {
-        'ANNEES': [get_year], 
+        'ANNEE': get_year, 
         'UPLOAD': get_upload
     }
 
-    # if get_download:
-    #     ppml = run_papermill_script(
-    #         INPUT_NB, 
-    #         OUTPUT_NB_DIR, 
-    #         params, 
-    #         all_cause_mortality_download_complete,
-    #         reporting_download_complete
-    # )
-    # else:
-    #     ppml = run_papermill_script(INPUT_NB, OUTPUT_NB_DIR, params)
+    if get_run_notebooks:
+        if get_download:
+            ppml = run_papermill_script(
+                INPUT_NB, 
+                OUTPUT_NB_DIR, 
+                params, 
+                all_cause_mortality_download_complete,
+                reporting_download_complete
+        )
+        else:
+            ppml = run_papermill_script(INPUT_NB, OUTPUT_NB_DIR, params)
 
 @pnlp_extract_process.task
 def extract_dhis_data(output_dir, year, mode, *args, **kwargs):
@@ -137,6 +152,9 @@ def dhis2_download_analytics(output_dir, extract_period, mode, *args, **kwargs):
     connection = workspace.dhis2_connection('drc-snis')
     dhis2 = DHIS2(connection=connection, cache_dir = None) # f'{workspace.files_path}/temp/')
 
+    ous = pd.DataFrame(dhis2.meta.organisation_units())
+    fosa_list = ous.loc[ous.level == 5].id.to_list() 
+
     # define data dimension 
     routine = False
     reporting_rates = False
@@ -171,27 +189,27 @@ def dhis2_download_analytics(output_dir, extract_period, mode, *args, **kwargs):
     # run extraction requests for analytics data
 
     # testing limits
-    dhis2.analytics.MAX_DX = 25
-    dhis2.analytics.MAX_OU = 25
+    dhis2.analytics.MAX_DX = 10
+    dhis2.analytics.MAX_OU = 10
 
     if mode == 'routine':
         raw_data = dhis2.analytics.get(
             data_elements = monitored_des,
             periods = extract_period,
-            org_unit_levels = [5]
+            org_units = fosa_list
         )
     elif mode == 'reporting-rates':
         raw_data = dhis2.analytics.get(
             data_elements = reporting_des,
             periods = extract_period,
-            org_unit_levels = [5],
+            org_units = fosa_list,
             include_cocs = False
         )
     else:
         raw_data = dhis2.analytics.get(
             indicators = acm_indicator_id,
             periods = extract_period,
-            org_unit_levels = [5],
+            org_units = fosa_list,
             include_cocs = False
         )
 
@@ -267,14 +285,16 @@ def get_dhis_month_period(year, routine=False):
 
     # first month of quarter (routine), extract previous quarter as well
     if routine and period_start_month in [4, 7, 10]:
-        return month_list = [ 
-            dhis_period_range(
-                year, 
-                period_start_month - 3, 
-                period_end_month - 1
-            ),
-            month_list
-        ]
+        return(
+            [ 
+                dhis_period_range(
+                    year, 
+                    period_start_month - 3, 
+                    period_end_month - 1
+                ),
+                month_list
+            ]
+        )
     
     return [month_list]
 
