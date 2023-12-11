@@ -284,7 +284,7 @@ def get_dhis_month_period(year, routine=False):
     month_list = dhis_period_range(year, period_start_month, period_end_month)
 
     # first month of quarter (routine), extract previous quarter as well
-    if routine and period_start_month in [4, 7, 10]:
+    if routine and period_end_month in [4, 7, 10]:
         return(
             [ 
                 dhis_period_range(
