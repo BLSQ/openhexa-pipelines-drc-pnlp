@@ -279,7 +279,16 @@ def get_dhis_month_period(year, routine=False):
             period_start_month = first_month_of_quarter(period_end_month)
     else:
         if routine:
-            raise NotImplementedError('Extract of routine data for historical periods not yet developed')
+            month_quarter_pairs = [(1, 3), (4, 6), (7, 9), (10, 12)]
+            return list(
+                        map(
+                            lambda x: dhis_period_range(
+                                year, 
+                                x[0], 
+                                x[1]), 
+                            month_quarter_pairs
+                            )
+                        )
         
     month_list = dhis_period_range(year, period_start_month, period_end_month)
 
