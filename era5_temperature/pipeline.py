@@ -61,7 +61,7 @@ def era5_temperature():
         hours=config["hours"],
         data_dir=os.path.join(workspace.files_path, config["download_dir"]),
     )
-    api.close()
+    # api.close()
 
     meta = get_raster_metadata(datafiles)
 

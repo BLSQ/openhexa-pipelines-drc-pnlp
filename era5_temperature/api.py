@@ -32,19 +32,19 @@ class Era5:
         beforehand.
         """
         connection = workspace.custom_connection("CLIMATE-DATA-STORE")
-        cdsapirc = os.path.join(os.getenv("HOME"), ".cdsapirc")
-        with open(cdsapirc, "w") as f:
-            f.write(f"url: {self.cds_api_url}\n")
-            f.write(f"key: {connection.api_uid}:{connection.api_key}\n")
-            f.write("verify: 0")
-        logger.info(f"Created .cdsapirc at {cdsapirc}")
-        self.api = cdsapi.Client()
+        # cdsapirc = os.path.join(os.getenv("HOME"), ".cdsapirc")
+        # with open(cdsapirc, "w") as f:
+        #     f.write(f"url: {self.cds_api_url}\n")
+        #     f.write(f"key: {connection.api_uid}:{connection.api_key}\n")
+        #     f.write("verify: 0")
+        # logger.info(f"Created .cdsapirc at {cdsapirc}")        
+        self.api = cdsapi.Client(url=self.cds_api_url, key=f"{connection.api_uid}:{connection.api_key}")
 
-    def close(self):
-        """Remove .cdsapirc from HOME directory."""
-        cdsapirc = os.path.join(os.getenv("HOME"), ".cdsapirc")
-        os.remove(cdsapirc)
-        logger.info(f"Removed .cdsapirc at {cdsapirc}")
+    # def close(self):
+    #     """Remove .cdsapirc from HOME directory."""
+    #     cdsapirc = os.path.join(os.getenv("HOME"), ".cdsapirc")
+    #     os.remove(cdsapirc)
+    #     logger.info(f"Removed .cdsapirc at {cdsapirc}")
 
     def download(
         self,
