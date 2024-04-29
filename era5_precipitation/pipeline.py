@@ -18,7 +18,7 @@ from openhexa.sdk import current_run, pipeline, workspace
 from utils import filesystem
 from sqlalchemy import create_engine
 import string
-from rasterstats import zonal_stats
+from rasterio.features import rasterize
 
 logger = logging.getLogger(__name__)
 
@@ -433,29 +433,25 @@ def _spatial_aggregation(
     """
 
     # get polygon shapes     
-    shapes = [geom.__geo_interface__ for geom in boundaries.geometry]
- 
+    areas = generate_boundaries_raster(
+        boundaries=boundaries, height=height, width=width, transform=transform
+    )
+
     var = [v for v in ds.data_vars][0]
 
     records = []
     days = [day for day in ds.time.values]
-
-    # quite slow -> could we run this only for dates not in the *daily.parquet file?
+    
+    
     for day in days:
         measurements = ds.sel(time=day)
         measurements = measurements[var].values
         
         for i, (_, row) in enumerate(boundaries.iterrows()):   
 
-            result = zonal_stats(shapes[i], 
-                        measurements,
-                        nodata=nodata,
-                        affine=transform,
-                        stats=["sum", "count"],
-                        all_touched=True
-                        )
-                 
-            new_stats = pd.Series([str(day)[:10], result[0]['count'] , result[0]['sum']], index=['period', 'count', 'sum'])            
+            count_val = np.sum(areas[i, :, :])
+            sum_val = np.nansum(measurements[(measurements >= 0) & (measurements != nodata) & (areas[i, :, :])])
+            new_stats = pd.Series([str(day)[:10], count_val, sum_val], index=['period', 'count', 'sum'])            
             records.append(pd.concat([row, new_stats]))
             
     records = pd.DataFrame(records)
@@ -499,6 +495,44 @@ def get_weekly_aggregates(df: pd.DataFrame) -> pd.DataFrame:
     merged_df = pd.merge(data_left, sums, on=["ref", "epi_year", "epi_week"], how='left')
 
     return merged_df
+
+
+def generate_boundaries_raster(
+    boundaries: gpd.GeoDataFrame, height: int, width: int, transform: rasterio.Affine
+):
+    """Generate a binary raster mask for each boundary.
+
+    Parameters
+    ----------
+    boundaries : gpd.GeoDataFrame
+        Boundaries to rasterize
+    height : int
+        Raster height
+    width : int
+        Raster width
+    transform : affine
+        Raster affine transform
+
+    Return
+    ------
+    areas : ndarray
+        A binary raster of shape (n_boundaries, height, width).
+    """
+    areas = np.empty(shape=(len(boundaries), height, width), dtype=np.bool_)
+    for i, geom in enumerate(boundaries.geometry):
+        area = rasterize(
+            [geom],
+            out_shape=(height, width),
+            fill=0,
+            default_value=1,
+            transform=transform,
+            all_touched=True,
+            dtype="uint8",
+        )
+        if np.count_nonzero(area) == 0:
+            logger.warn(f"No cell covered by input geometry {i}")
+        areas[i, :, :] = area == 1
+    return areas
 
 
 def _compute_mid_date(epiweek: EpiWeek) -> datetime:        
