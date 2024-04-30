@@ -504,7 +504,9 @@ def get_weekly_aggregates(df: pd.DataFrame) -> pd.DataFrame:
 
     # epiweek aggregation sum
     sums = df_.groupby(by=["ref", "epi_year", "epi_week"])[["sum"]].sum().reset_index()
-    data_left = df_.drop(columns=["period", "sum"])
+    data_left = df_.copy()
+    data_left['period'] = data_left["period"].apply(lambda day: str(EpiWeek(datetime.strptime(day, "%Y-%m-%d"))))
+    data_left = data_left.drop(columns=["sum"])
     data_left = data_left.drop_duplicates(subset=data_left.columns) # unique rows
     
     # merge 
