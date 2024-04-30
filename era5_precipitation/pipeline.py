@@ -509,6 +509,7 @@ def get_weekly_aggregates(df: pd.DataFrame) -> pd.DataFrame:
     
     # merge 
     merged_df = pd.merge(data_left, sums, on=["ref", "epi_year", "epi_week"], how='left')
+    merged_df = merged_df.drop(columns=["period"])
 
     return merged_df
 
