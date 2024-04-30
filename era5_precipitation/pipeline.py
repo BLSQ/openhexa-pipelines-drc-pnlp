@@ -77,8 +77,7 @@ def era5_precipitation():
         ),    
         start_date=start_date    
     ) 
-    
-    # slow aggregation due to the use of zonal_stats() function..
+        
     df_daily = spatial_aggregation(
         ds=ds,
         dst_file=os.path.join(
@@ -92,7 +91,7 @@ def era5_precipitation():
         column_name=config["column_name"],
     )
 
-    _ = weekly(
+    df_weekly = weekly(
         df=df_daily,
         dst_file=os.path.join(
             workspace.files_path,
@@ -101,7 +100,8 @@ def era5_precipitation():
         ),
     )
     
-    ## upload to table 
+    ## upload to table
+    upload_data_to_table(df=df_weekly, targetTable=config['update_table']) 
 
 
 @era5_precipitation.task
@@ -254,6 +254,22 @@ def weekly(df: pd.DataFrame, dst_file: str) -> pd.DataFrame:
         fs.put(tmp.name, dst_file)
     current_run.add_file_output(dst_file)
     return df_weekly
+
+
+@era5_precipitation.task
+def upload_data_to_table(df: pd.DataFrame, targetTable:str):
+    """Upload the processed weekly data temperature stats to target table."""
+
+    targetTable_safe = _safe_from_injection(targetTable)
+    current_run.log_info(f"Updating weekly table : {targetTable_safe}")
+
+    # Create engine
+    dbengine = create_engine(os.environ["WORKSPACE_DATABASE_URL"]) 
+
+    # Create table
+    df.to_sql(targetTable_safe, dbengine, index=False, if_exists="replace", chunksize=4096)
+    
+    del dbengine
 
 
 def download_epiWeek_products(
