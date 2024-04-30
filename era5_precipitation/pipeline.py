@@ -511,6 +511,7 @@ def get_weekly_aggregates(df: pd.DataFrame) -> pd.DataFrame:
     
     # merge 
     merged_df = pd.merge(data_left, sums, on=["ref", "epi_year", "epi_week"], how='left')
+    merged_df['mid_date'] = pd.to_datetime(merged_df['mid_date'])
 
     return merged_df
 
