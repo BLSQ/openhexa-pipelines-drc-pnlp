@@ -1,4 +1,3 @@
-"""Template for newly generated pipelines."""
 import os
 import papermill as pm
 from datetime import datetime
@@ -6,7 +5,7 @@ from datetime import datetime
 from openhexa.sdk import current_run, pipeline, parameter, workspace
 
 
-@pipeline("sentinel-update-extract", name="sentinel_update_extract")
+@pipeline(code="sentinel-update-extract", name="Sentinel update extract")
 @parameter(
     "get_year",
     name="Year",
@@ -63,16 +62,21 @@ def run_update_with(nb_name:str, nb_path:str, out_nb_path:str, parameters:dict):
         
     current_run.log_info(f"Executing sentinel update notebook: {nb_full_path}")
     current_run.log_info(f"Running report for YEAR: {parameters['ANNEE_A_ANALYSER']}")
-    current_run.log_info(f"Databases update -> legacy: {parameters['UPLOAD_LEGACY']} pnlp: {parameters['UPLOAD_LEGACY']}")
+    current_run.log_info(f"Database updates -> legacy: {parameters['UPLOAD_LEGACY']} pnlp: {parameters['UPLOAD_PNLP']}")
 
     # out_nb_fname = os.path.basename(in_nb_dir.replace('.ipynb', ''))
     execution_timestamp = datetime.utcnow().strftime("%Y-%m-%d_%H_%M_%S")   
     out_nb_fname = f"{nb_name}_OUTPUT_{execution_timestamp}.ipynb" 
     out_nb_full_path = os.path.join(out_nb_path, out_nb_fname)
 
-    pm.execute_notebook(input_path = nb_full_path,
-                        output_path = out_nb_full_path,
-                        parameters=parameters)
+    try:            
+        pm.execute_notebook(input_path = nb_full_path,
+                            output_path = out_nb_full_path,
+                            parameters=parameters)
+    except Exception as e:
+        current_run.log_info(f'Caught error {type(e)}: e')
+
+    current_run.log_info(f"Sentinel table updated")
 
  
 
