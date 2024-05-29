@@ -11,7 +11,7 @@ from openhexa.sdk.datasets.dataset import DatasetVersion
 @parameter(
     "manual_run",
     name="Manual run",
-    help="Execute the pipeline manually?",
+    help="Execute the pipeline manually and ignore checks?",
     type=bool,
     default=False,
     required=False,
