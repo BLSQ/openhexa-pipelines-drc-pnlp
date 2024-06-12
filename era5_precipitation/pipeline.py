@@ -100,8 +100,11 @@ def era5_precipitation():
         ),
     )
     
-    ## upload to table
+    # upload to table
     upload_data_to_table(df=df_weekly, targetTable=config['update_table']) 
+
+    # update dataset
+    update_precipitation_dataset(df=df_weekly) 
 
 
 @era5_precipitation.task
@@ -180,7 +183,6 @@ def merge_ERA5(src_files: List[str], dst_file: str, start_date: datetime) -> xr.
     return ds
 
  
-
 @era5_precipitation.task
 def spatial_aggregation(
     ds: xr.Dataset,
@@ -271,6 +273,36 @@ def upload_data_to_table(df: pd.DataFrame, targetTable:str):
     
     del dbengine
 
+
+@era5_precipitation.task
+def update_precipitation_dataset(df: pd.DataFrame):
+    """Update the precipitation dataset to be shared."""
+    
+    current_run.log_info(f"Updating precipitation dataset")
+
+    # Get the dataset 
+    dataset = workspace.get_dataset("climate-dataset-precipi-6349a3")
+    date_version = f"ds_{datetime.now().strftime('%Y_%m_%d_%H%M')}"
+
+    try:
+        # Create new DS version
+        version = dataset.create_version(date_version) 
+    except Exception as e:
+        print(f"The dataset version already exists - ERROR: {e}")
+        raise
+            
+    try:
+        # Add Precipitation .parquet to DS
+        with tempfile.NamedTemporaryFile(suffix=".parquet") as tmp:
+            df.to_parquet(tmp.name)
+            version.add_file(tmp.name, filename=f"Precipitation_{date_version}.parquet")                
+    except Exception as e:
+        print(f"Dataset file cannot be saved - ERROR: {e}")
+        raise
+
+    current_run.log_info(f"New dataset version {date_version} created")
+    
+    
 
 def download_epiWeek_products(
     api: Era5,
