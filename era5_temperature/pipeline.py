@@ -15,6 +15,7 @@ from api import Era5
 from dateutil.relativedelta import relativedelta
 from epiweek import EpiWeek
 from openhexa.sdk import current_run, pipeline, workspace
+from openhexa.sdk.datasets.dataset import DatasetVersion
 from rasterio.features import rasterize
 from utils import filesystem
 from sqlalchemy import create_engine
@@ -61,9 +62,10 @@ def era5_temperature():
         hours=config["hours"],
         data_dir=os.path.join(workspace.files_path, config["download_dir"]),
     )
-    # api.close()
+    api.close()
 
     meta = get_raster_metadata(datafiles)
+    ds_version = get_new_temperature_dataset_version()
 
     # Loop over the two tables we need to produce for DRC PNLP
     for agg in ["min", "max"]: ## we want weekly tmax and tmin tables
@@ -106,6 +108,9 @@ def era5_temperature():
         # Push the data to the DB table
         upload_data_to_table(df=df_weekly, targetTable=config[f't{agg}_table']) 
         # Passing the dbengine as parameter throw a pickel/dill exception (see logs of fail runs)
+
+        # Update dataset file
+        update_temperature_dataset(df=df_weekly, suffix=f"t{agg}", datasetversion=ds_version)
 
  
 
@@ -151,6 +156,24 @@ def get_raster_metadata(datafiles: List[str]) -> dict:
     with rasterio.open(datafiles[0]) as src:
         meta = src.meta
     return meta
+
+
+@era5_temperature.task
+def get_new_temperature_dataset_version():
+    
+    # Get the dataset 
+    dataset = workspace.get_dataset("climate-dataset-tempera-39e1f8")
+    date_version = f"ds_{datetime.datetime.now().strftime('%Y_%m_%d_%H%M')}"
+
+    try:
+        # Create new DS version
+        version = dataset.create_version(date_version) 
+    except Exception as e:
+        print(f"The dataset version already exists - ERROR: {e}")
+        raise
+
+    # datasetversion.name   
+    return version
 
 
 @era5_temperature.task
@@ -270,6 +293,26 @@ def upload_data_to_table(df: pd.DataFrame, targetTable:str, create=True):
     current_run.log_info(f"Updating weekly table : {targetTable_safe}")
     del dbengine
     
+
+@era5_temperature.task
+def update_temperature_dataset(df: pd.DataFrame, suffix:str, datasetversion:DatasetVersion):
+    """Update the temperature dataset to be shared."""
+    
+    current_run.log_info(f"Updating temperature dataset")
+            
+    try:
+        # Add temperature .parquet to DS
+        with tempfile.NamedTemporaryFile(suffix=".parquet") as tmp:
+            df.to_parquet(tmp.name)
+            datasetversion.add_file(tmp.name, filename=f"Temperature_{suffix}_{datasetversion.name}.parquet")   
+        
+    except Exception as e:
+        print(f"Dataset file cannot be saved - ERROR: {e}")
+        raise
+
+    current_run.log_info(f"New dataset version {datasetversion.name} created")
+    
+
 
 def download_monthly_products(
     api: Era5,
