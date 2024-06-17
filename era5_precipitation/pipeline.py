@@ -65,7 +65,9 @@ def era5_precipitation():
         hours=config["hours"],
         data_dir=os.path.join(workspace.files_path, config["download_dir"])        
     )
-    api.close() 
+    # The credentials file is no longer created nor removed from a temp directory (prev api version)
+    # Better to use connections functionality from openhexa to configure the Api
+    # api.close() 
 
     meta = get_raster_metadata(datafiles)
 
