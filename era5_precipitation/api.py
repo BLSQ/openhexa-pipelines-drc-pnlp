@@ -33,7 +33,7 @@ class Era5:
         The API key must have been generated in CDS web application
         beforehand.
         """
-        connection = workspace.custom_connection("CLIMATE-DATA-STORE")
+        connection = workspace.custom_connection("climate-data-store")
         # cdsapirc = os.path.join(os.getenv("HOME"), ".cdsapirc")
         # with open(cdsapirc, "w") as f:
         #     f.write(f"url: {self.cds_api_url}\n")
