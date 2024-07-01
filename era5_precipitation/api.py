@@ -40,7 +40,7 @@ class Era5:
         #     f.write(f"key: {connection.api_uid}:{connection.api_key}\n")
         #     f.write("verify: 0")
         # logger.info(f"Created .cdsapirc at {cdsapirc}")
-        self.api = cdsapi.Client(url=self.cds_api_url, key=f"{connection.api_uid}:{connection.api_key}")
+        self.api = cdsapi.Client(url=self.cds_api_url, key=f"{connection.API_UID}:{connection.API_KEY}")
 
     # def close(self):
     #     """Remove .cdsapirc from HOME directory."""
