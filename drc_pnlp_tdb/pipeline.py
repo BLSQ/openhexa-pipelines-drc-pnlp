@@ -5,6 +5,7 @@ import io
 import os
 
 import pandas as pd
+import polars as pl # needed in temp function 
 import geopandas as gpd
 import papermill as pm
 
@@ -17,13 +18,13 @@ from openhexa.sdk import current_run, parameter, pipeline, workspace
 from openhexa.toolbox.dhis2 import DHIS2
 
 
-@pipeline(code = "drc-pnlp-tdb", name="DRC PNLP TdB", timeout = 8 * 60 * 60)
+@pipeline(code = "drc-pnlp-tdb", name="DRC PNLP TdB") #, timeout = 12 * 60 * 60)
 @parameter(
     "get_year",
     name="Year",
     help="Year for which to extract and process data",
     type=int,
-    default=2023,
+    default=2024,
     required=False,
 )
 @parameter(
@@ -47,7 +48,7 @@ from openhexa.toolbox.dhis2 import DHIS2
     name="Upload?",
     help="Whether or not to push the processed results to the dashboard DB",
     type=bool,
-    default=False,
+    default=True,
     required=False,
 )
 def pnlp_extract_process(
@@ -138,6 +139,7 @@ def run_papermill_script(in_nb, out_nb_dir, parameters, *args, **kwargs):
     pm.execute_notebook(in_nb, out_nb, parameters)
     return        
 
+
 #### helper functions ####
 def dhis2_download_analytics(output_dir, extract_period, mode, *args, **kwargs):
     """
@@ -168,6 +170,7 @@ def dhis2_download_analytics(output_dir, extract_period, mode, *args, **kwargs):
         monitored_des = pd.read_csv(metadata_file_path).dx_uid.to_list() 
         
         output_directory_name = 'routine'
+
     elif mode == 'reporting-rates':
         reporting_rates = True
 
@@ -182,6 +185,7 @@ def dhis2_download_analytics(output_dir, extract_period, mode, *args, **kwargs):
         reporting_datasets = ['pMbC0FJPkcm', 'maDtHIFrSHx', 'OeWrFwkFMvf']
         output_directory_name = 'reporting-rates'
         reporting_des = [f"{ds}.{metric}" for ds, metric in product(reporting_datasets, METRICS)]
+    
     else:
         acm_indicator_id = ["fvlFcxuGRng"]
         output_directory_name = 'all-cause-mortality'
@@ -218,7 +222,8 @@ def dhis2_download_analytics(output_dir, extract_period, mode, *args, **kwargs):
     # extract metadata
     current_run.log_info("Extracting + merging instance metadata")
     df = dhis2.meta.add_org_unit_name_column(dataframe=df)
-    df = dhis2.meta.add_org_unit_parent_columns(dataframe=df)
+    # df = dhis2.meta.add_org_unit_parent_columns(dataframe=df) # ERROR
+    df = add_org_unit_parent_columns_TEMP(df, ous, dhis2)
 
     if reporting_rates:
         # default dx values are in the format "<dataset_uid>.<reporting_rate_metric>"
@@ -265,6 +270,11 @@ def get_dhis_month_period(year, routine=False):
     """
 
     current_date = date.today()
+    
+    # "Hacky solution" to run the pipeline for a specific period
+    # current_date = datetime.strptime('2024-04-01', '%Y-%m-%d').date() # Run for quarter Q1
+    # current_date = datetime.strptime('2024-07-01', '%Y-%m-%d').date() # Run for quarter Q2
+    # current_date = datetime.strptime('2024-10-01', '%Y-%m-%d').date() # Run for quarter Q3
 
     period_start_month = 1
     period_end_month = 12
@@ -335,6 +345,55 @@ def month_to_quarter(num):
     y = num // 100
     m = num % 100
     return "Q" + str((m - 1) // 3 + 1)
+
+
+## temporary method to add parent names of org units
+def add_org_unit_parent_columns_TEMP(df, org_units, dhis2):
+    
+    levels = pl.DataFrame(dhis2.meta.organisation_unit_levels())
+    org_units_polar = pl.from_pandas(org_units.drop(columns=["geometry"]))
+    
+    # Create columns for parent levels
+    columns = []
+    for lvl in range(1, len(levels)):
+        columns.append(
+            pl.col("path").str.split("/").list.get(lvl).alias(f"parent_level_{lvl}_id")
+        )
+    
+    org_units_parent = org_units_polar.with_columns(columns)
+    
+    # Loop over the levels and perform the join for each 
+    for lvl in range(1, len(levels)):         
+        parent_level_df = org_units_polar.filter(pl.col("level") == lvl).select([
+            pl.col("id"),
+            pl.col("name").alias(f"parent_level_{lvl}_name")
+        ])
+        
+        org_units_parent = org_units_parent.join(
+            other=parent_level_df,
+            left_on=f"parent_level_{lvl}_id",
+            right_on="id",
+            how="left",
+            coalesce=True,
+        )
+    
+    # Select only relevant columns from org_units_parent
+    selected_columns = ['id'] + [f'parent_level_{lvl}_{col}' for lvl in range(1, len(levels)) for col in ['id', 'name']]
+    selected_polars_df = org_units_parent.select(selected_columns)
+    
+    # Convert to pandas DataFrame
+    selected_pandas_df = selected_polars_df.to_pandas()
+    
+    # Merge with original dataframe
+    merged_df = df.merge(selected_pandas_df, left_on='ou', right_on='id', how='left')
+    merged_df.drop(columns=['id'], inplace=True)
+
+    return merged_df
+
+
+
+
+
 
 if __name__ == "__main__":
     pnlp_extract_process.run()
