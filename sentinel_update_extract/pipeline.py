@@ -14,14 +14,14 @@ from openhexa.sdk import current_run, pipeline, parameter, workspace
     default=2024,
     required=True,
 )
-@parameter(
-    "update_legacy",
-    name="Update legacy",
-    help="Update legacy OpenHexa database",
-    type=bool,
-    default=False,
-    required=False,
-)
+# @parameter(
+#     "update_legacy",
+#     name="Update legacy",
+#     help="Update legacy OpenHexa database",
+#     type=bool,
+#     default=False,
+#     required=False,
+# )
 @parameter(
     "update_pnlp",
     name="Update pnlp",
@@ -30,7 +30,7 @@ from openhexa.sdk import current_run, pipeline, parameter, workspace
     default=True,
     required=False,
 )
-def sentinel_update_extract(get_year, update_legacy, update_pnlp):
+def sentinel_update_extract(get_year, update_pnlp):
     """
     In this pipeline we call a notebook that executes the sentinel extract update
     
@@ -44,7 +44,7 @@ def sentinel_update_extract(get_year, update_legacy, update_pnlp):
     # Set parameters
     parameters = {
         'ANNEE_A_ANALYSER': get_year,
-        'UPLOAD_LEGACY' : update_legacy,
+        # 'UPLOAD_LEGACY' : update_legacy,
         'UPLOAD_PNLP' : update_pnlp        
     }
 
@@ -62,7 +62,7 @@ def run_update_with(nb_name:str, nb_path:str, out_nb_path:str, parameters:dict):
         
     current_run.log_info(f"Executing sentinel update notebook: {nb_full_path}")
     current_run.log_info(f"Running report for YEAR: {parameters['ANNEE_A_ANALYSER']}")
-    current_run.log_info(f"Database updates -> legacy: {parameters['UPLOAD_LEGACY']} pnlp: {parameters['UPLOAD_PNLP']}")
+    current_run.log_info(f"Database update PNLP: {parameters['UPLOAD_PNLP']}")
 
     # out_nb_fname = os.path.basename(in_nb_dir.replace('.ipynb', ''))
     execution_timestamp = datetime.utcnow().strftime("%Y-%m-%d_%H_%M_%S")   
