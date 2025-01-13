@@ -1,0 +1,2 @@
+[tool.ruff]
+line-length = 120  # Set to your preferred value (default is 88)

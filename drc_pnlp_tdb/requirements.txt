@@ -1,1 +1,1 @@
-openhexa.toolbox
+openhexa.toolbox==1.6.1

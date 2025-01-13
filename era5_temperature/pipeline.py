@@ -23,8 +23,10 @@ import string
 
 logger = logging.getLogger(__name__)
 
+
 class ERA5Error(Exception):
     pass
+
 
 class ERA5MissingData(ERA5Error):
     pass
@@ -43,20 +45,17 @@ def era5_temperature():
     dt = dt - relativedelta(months=1)
     end_date = datetime.datetime(dt.year, dt.month, monthrange(dt.year, dt.month)[1])
 
-    # Create engine
-    dbengine = create_engine(os.environ["WORKSPACE_DATABASE_URL"]) 
+    # NOTE: Make sure this pipeline is running after precipitation
+    # Precipitation pipeline is downloading and updating the boundaries table
+    # using the pyramid from SNIS.
 
     # load boundaries
-    boundaries=gpd.read_postgis(_safe_from_injection(config['boundaries_table']), con=dbengine, geom_col='geometry')
-    del dbengine
+    boundaries = load_boundaries(config)
 
-    api = Era5()
-    api.init_cdsapi()
-    current_run.log_info("Connected to Climate Data Store API")
+    # download data
     datafiles = download(
-        api=api,
         cds_variable=config["cds_variable"],
-        bounds=boundaries.total_bounds,
+        bounds=boundaries,
         start_date=datetime.datetime.strptime(config["start_date"], "%Y-%m-%d"),
         end_date=end_date,
         hours=config["hours"],
@@ -64,18 +63,21 @@ def era5_temperature():
     )
     # The credentials file is no longer created nor removed from a temp directory (prev api version)
     # Better to use connections functionality from openhexa to configure the Api
-    # api.close() 
+    # api.close()
 
+    # get raster metadata
     meta = get_raster_metadata(datafiles)
+
+    # get new dataset version
     ds_version = get_new_temperature_dataset_version()
 
     # Loop over the two tables we need to produce for DRC PNLP
-    for agg in ["min", "max"]: ## we want weekly tmax and tmin tables
+    for agg in ["min", "max"]:  ## we want weekly tmax and tmin tables
         # merge data
         ds = merge(
-            src_files=datafiles,            
+            src_files=datafiles,
             dst_file=os.path.join(
-                workspace.files_path, 
+                workspace.files_path,
                 config["output_dir"],
                 f"{config['cds_variable']}_t{agg}.nc",
             ),
@@ -86,7 +88,7 @@ def era5_temperature():
         df_daily = spatial_aggregation(
             ds=ds,
             dst_file=os.path.join(
-                workspace.files_path,                 
+                workspace.files_path,
                 config["output_dir"],
                 f"{config['cds_variable']}_t{agg}_daily.parquet",
             ),
@@ -96,11 +98,11 @@ def era5_temperature():
             column_name=config["column_name"],
         )
 
-        # weekly values reformat for DRC 
+        # weekly values reformat for DRC
         df_weekly = weekly_for_DRC(
             df=df_daily,
             dst_file=os.path.join(
-                workspace.files_path, 
+                workspace.files_path,
                 config["output_dir"],
                 f"{config['cds_variable']}_t{agg}_weekly.parquet",
             ),
@@ -108,26 +110,39 @@ def era5_temperature():
         )
 
         # Push the data to the DB table
-        upload_data_to_table(df=df_weekly, targetTable=config[f't{agg}_table']) 
+        upload_data_to_table(df=df_weekly, targetTable=config[f"t{agg}_table"])
         # Passing the dbengine as parameter throw a pickel/dill exception (see logs of fail runs)
 
         # Update dataset file
         update_temperature_dataset(df=df_weekly, suffix=f"t{agg}", datasetversion=ds_version)
 
- 
+
+@era5_temperature.task
+def load_boundaries(config: dict) -> gpd.GeoDataFrame:
+    """Load boundaries from database."""
+    current_run.log_info(f'Loading boundaries from {config["boundaries_table"]}')
+    dbengine = create_engine(os.environ["WORKSPACE_DATABASE_URL"])
+    boundaries = gpd.read_postgis(_safe_from_injection(config["boundaries_table"]), con=dbengine, geom_col="geometry")
+    return boundaries
+
 
 @era5_temperature.task
 def download(
-    api: Era5,
     cds_variable: str,
-    bounds: Tuple[float],
+    bounds: gpd.GeoDataFrame,
     start_date: datetime.datetime,
     end_date: datetime.datetime,
     hours: List[str],
     data_dir: str,
 ) -> List[str]:
     """Download data products to cover the area of interest."""
-    xmin, ymin, xmax, ymax = bounds
+
+    api = Era5()
+    api.init_cdsapi()
+    current_run.log_info("Connected to Climate Data Store API")
+    current_run.log_debug(f"Downloading data for variable: {cds_variable}")
+
+    xmin, ymin, xmax, ymax = bounds.total_bounds
 
     # add a buffer around the bounds and rearrange order for
     # compatbility with climate data store API
@@ -162,19 +177,18 @@ def get_raster_metadata(datafiles: List[str]) -> dict:
 
 @era5_temperature.task
 def get_new_temperature_dataset_version():
-    
-    # Get the dataset 
+    # Get the dataset
     dataset = workspace.get_dataset("climate-dataset-tempera-39e1f8")
     date_version = f"ds_{datetime.datetime.now().strftime('%Y_%m_%d_%H%M')}"
 
     try:
         # Create new DS version
-        version = dataset.create_version(date_version) 
+        version = dataset.create_version(date_version)
     except Exception as e:
         print(f"The dataset version already exists - ERROR: {e}")
         raise
 
-    # datasetversion.name   
+    # datasetversion.name
     return version
 
 
@@ -196,8 +210,8 @@ def merge(src_files: List[str], dst_file: str, agg: str) -> xr.Dataset:
     dataset
         Output merged dataset
     """
-    ds = merge_datasets(src_files, agg=agg) 
-    
+    ds = merge_datasets(src_files, agg=agg)
+
     # convert degrees K to degrees C
     ds = ds - 273.15
 
@@ -254,9 +268,7 @@ def spatial_aggregation(
         column_name=column_name,
     )
 
-    current_run.log_info(
-        f"Applied spatial aggregation for {len(boundaries)} boundaries"
-    )
+    current_run.log_info(f"Applied spatial aggregation for {len(boundaries)} boundaries")
 
     fs = filesystem(dst_file)
     with tempfile.NamedTemporaryFile(suffix=".parquet") as tmp:
@@ -268,7 +280,7 @@ def spatial_aggregation(
 
 
 @era5_temperature.task
-def weekly_for_DRC(df: pd.DataFrame, dst_file: str, agg:str) -> pd.DataFrame:
+def weekly_for_DRC(df: pd.DataFrame, dst_file: str, agg: str) -> pd.DataFrame:
     """Get weekly temperature stats from daily dataset."""
     df_weekly = get_weekly_aggregates_for_DRC(df, agg)
     current_run.log_info(f"Applied weekly aggregation ({len(df_weekly)} measurements)")
@@ -277,43 +289,42 @@ def weekly_for_DRC(df: pd.DataFrame, dst_file: str, agg:str) -> pd.DataFrame:
         df_weekly.to_parquet(tmp.name)
         fs.put(tmp.name, dst_file)
     current_run.add_file_output(dst_file)
-    
+
     return df_weekly
 
 
 @era5_temperature.task
-def upload_data_to_table(df: pd.DataFrame, targetTable:str, create=True):
+def upload_data_to_table(df: pd.DataFrame, targetTable: str, create=True):
     """Upload the processed weekly data temperature stats to target table."""
 
     targetTable_safe = _safe_from_injection(targetTable)
 
     # Create engine
-    dbengine = create_engine(os.environ["WORKSPACE_DATABASE_URL"]) 
+    dbengine = create_engine(os.environ["WORKSPACE_DATABASE_URL"])
 
     # Create table
     df.to_sql(targetTable_safe, dbengine, index=False, if_exists="replace", chunksize=4096)
     current_run.log_info(f"Updating weekly table : {targetTable_safe}")
     del dbengine
-    
+
 
 @era5_temperature.task
-def update_temperature_dataset(df: pd.DataFrame, suffix:str, datasetversion:DatasetVersion):
+def update_temperature_dataset(df: pd.DataFrame, suffix: str, datasetversion: DatasetVersion):
     """Update the temperature dataset to be shared."""
-    
-    current_run.log_info(f"Updating temperature dataset")
-            
+
+    current_run.log_info("Updating temperature dataset")
+
     try:
         # Add temperature .parquet to DS
         with tempfile.NamedTemporaryFile(suffix=".parquet") as tmp:
             df.to_parquet(tmp.name)
-            datasetversion.add_file(tmp.name, filename=f"Temperature_{suffix}_{datasetversion.name}.parquet")   
-        
+            datasetversion.add_file(tmp.name, filename=f"Temperature_{suffix}_{datasetversion.name}.parquet")
+
     except Exception as e:
         print(f"Dataset file cannot be saved - ERROR: {e}")
         raise
 
     current_run.log_info(f"New dataset version {datasetversion.name} created")
-    
 
 
 def download_monthly_products(
@@ -391,9 +402,7 @@ def download_monthly_products(
                 logger.info(msg)
                 current_run.log_info(msg)
             else:
-                msg = (
-                    f"Missing data for period {date_.year:04}{date_.month:02}, skipping"
-                )
+                msg = f"Missing data for period {date_.year:04}{date_.month:02}, skipping"
                 logger.info(msg)
                 current_run.log_info(msg)
                 return dst_files
@@ -446,9 +455,11 @@ def merge_datasets(datafiles: List[str], agg: str = "mean") -> xr.Dataset:
     xarray dataset
         Merged dataset of shape (height, width, n_days).
     """
-    datasets = [] 
+    datasets = []
     for datafile in datafiles:
         ds = xr.open_dataset(datafile)
+        if "valid_time" in ds.variables:
+            ds = ds.rename({"valid_time": "time"})
         if agg == "mean":
             ds = ds.resample(time="1D").mean()
         elif agg == "sum":
@@ -473,9 +484,7 @@ def merge_datasets(datafiles: List[str], agg: str = "mean") -> xr.Dataset:
     return ds
 
 
-def generate_boundaries_raster(
-    boundaries: gpd.GeoDataFrame, height: int, width: int, transform: rasterio.Affine
-):
+def generate_boundaries_raster(boundaries: gpd.GeoDataFrame, height: int, width: int, transform: rasterio.Affine):
     """Generate a binary raster mask for each boundary.
 
     Parameters
@@ -550,9 +559,7 @@ def _spatial_aggregation(
     dataframe
         Mean value as a dataframe of length (n_boundaries * n_time_steps)
     """
-    areas = generate_boundaries_raster(
-        boundaries=boundaries, height=height, width=width, transform=transform
-    )
+    areas = generate_boundaries_raster(boundaries=boundaries, height=height, width=width, transform=transform)
 
     var = [v for v in ds.data_vars][0]
 
@@ -564,11 +571,9 @@ def _spatial_aggregation(
         measurements = measurements[var].values
 
         for i, (_, row) in enumerate(boundaries.iterrows()):
-            value = np.mean(
-                measurements[
-                    (measurements >= 0) & (measurements != nodata) & (areas[i, :, :])
-                ]
-            )
+            # value = np.mean(measurements[(measurements >= 0) & (measurements != nodata) & (areas[i, :, :])])
+            # make sure we're selecting numbers , the previous filter by >=0 was excluding negative values..
+            value = np.mean(measurements[(np.isfinite(measurements)) & (measurements != nodata) & (areas[i, :, :])])
             records.append(
                 {
                     "uid": row[column_uid],
@@ -581,7 +586,7 @@ def _spatial_aggregation(
     return pd.DataFrame(records)
 
 
-def get_weekly_aggregates_for_DRC(df: pd.DataFrame, agg:str) -> pd.DataFrame:
+def get_weekly_aggregates_for_DRC(df: pd.DataFrame, agg: str) -> pd.DataFrame:
     """Apply weekly aggregation of input daily dataframe.
 
     This method creates a formatted table with the expected structure
@@ -589,7 +594,7 @@ def get_weekly_aggregates_for_DRC(df: pd.DataFrame, agg:str) -> pd.DataFrame:
 
     Uses epidemiological weeks and assumes 4 columns in input
     dataframe: uid, name, period and value.
-    
+
     Parameters
     ----------
     df : dataframe
@@ -606,40 +611,38 @@ def get_weekly_aggregates_for_DRC(df: pd.DataFrame, agg:str) -> pd.DataFrame:
     df_["epiweek"] = df_["period"].apply(lambda day: str(EpiWeek(datetime.datetime.strptime(day, "%Y-%m-%d"))))
 
     # get min/max date by epiweek
-    df_sd = df_.groupby(by=["uid", "name", "epiweek"]).min().reset_index().drop(columns='value')
-    df_ed = df_.groupby(by=["uid", "name", "epiweek"]).max().reset_index().drop(columns='value')    
-    
+    df_sd = df_.groupby(by=["uid", "name", "epiweek"]).min().reset_index().drop(columns="value")
+    df_ed = df_.groupby(by=["uid", "name", "epiweek"]).max().reset_index().drop(columns="value")
+
     # Stats
-    df_g = df_.groupby(by=["uid", "name", "epiweek"])['value'].agg(['min', 'max', 'mean']).reset_index()
-    
+    df_g = df_.groupby(by=["uid", "name", "epiweek"])["value"].agg(["min", "max", "mean"]).reset_index()
+
     # Merge start and end dates
-    df_g = df_g.merge(df_sd, on=["uid", "name", "epiweek"], how='left')
-    df_ = df_g.merge(df_ed, on=["uid", "name", "epiweek"], how='left')
-    
+    df_g = df_g.merge(df_sd, on=["uid", "name", "epiweek"], how="left")
+    df_ = df_g.merge(df_ed, on=["uid", "name", "epiweek"], how="left")
+
     # Rename columns
-    df_.columns = ['uid', 'name', 'epiweek', f't{agg}_min', f't{agg}_max', f't{agg}_mean', 'start', 'end']
+    df_.columns = ["uid", "name", "epiweek", f"t{agg}_min", f"t{agg}_max", f"t{agg}_mean", "start", "end"]
 
     # Add extra columns as int
-    df_[['year', 'week']] = df_['epiweek'].str.split('W', expand=True).astype(int)    
-    df_.drop(columns='uid', inplace=True)
+    df_[["year", "week"]] = df_["epiweek"].str.split("W", expand=True).astype(int)
+    # df_.drop(columns="uid", inplace=True)
 
     # format temps
     for column in df_.columns:
         if df_[column].dtype == "float32":
             df_[column] = df_[column].astype(float).round(1)
-    
+
     # format dates
-    df_['start'] = pd.to_datetime(df_['start'])
-    df_['end'] = pd.to_datetime(df_['end']) 
+    df_["start"] = pd.to_datetime(df_["start"])
+    df_["end"] = pd.to_datetime(df_["end"])
 
     return df_
 
 
 def _safe_from_injection(db_table: str) -> str:
     """Remove potential SQL injection."""
-    return "".join(
-        [c for c in db_table if c in string.ascii_letters + string.digits + "_"]
-    )
+    return "".join([c for c in db_table if c in string.ascii_letters + string.digits + "_"])
 
 
 if __name__ == "__main__":
