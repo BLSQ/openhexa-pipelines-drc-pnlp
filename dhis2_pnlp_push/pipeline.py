@@ -236,6 +236,9 @@ def push_population(
 
     # log parameters
     logging.info(f"Import strategy: {import_strategy} - Dry Run: {dry_run} - Max Post elements: {max_post}")
+    current_run.log_info(
+        f"Pushing population with parameters import_strategy: {import_strategy}, dry_run: {dry_run}, max_post: {max_post}"
+    )
 
     try:
         pop_mappings = config.get("POPULATION_MAPPING", None)
@@ -263,7 +266,7 @@ def push_population(
                 "attribute_option_combo",
                 "value",
             ]
-            df = pop_source[mandatory_fields]
+            df = pop_source[mandatory_fields].copy()
 
             # Sort the dataframe by org_unit to reduce the time (hopefully)
             df = df.sort_values(by=["org_unit"], ascending=True)
@@ -355,11 +358,13 @@ def push_extracts(
 
     # log parameters
     logging.info(f"Import strategy: {import_strategy} - Dry Run: {dry_run} - Max Post elements: {max_post}")
-    current_run.log_info(f"Import strategy: {import_strategy} - Dry Run: {dry_run} - Max Post elements: {max_post}")
+    current_run.log_info(
+        f"Pushing data elemetns with parameters import_strategy: {import_strategy}, dry_run: {dry_run}, max_post: {max_post}"
+    )
 
     try:
-        data_mappings = config.get("DATAELEMENT_MAPPING", None)
-        if data_mappings is None:
+        dataelement_mappings = config.get("DATAELEMENT_MAPPING", None)
+        if dataelement_mappings is None:
             current_run.log_error("No DATAELEMENT_MAPPING found in the configuration file.")
             raise ValueError
         rate_mappings = config.get("RATE_MAPPING", None)
@@ -390,6 +395,21 @@ def push_extracts(
                 )
                 continue
 
+            # NOTE: FILTER -> DO NOT PUSH THESE RATES, NOT USED!
+            df = extract_data[
+                ~(extract_data.rate_type.isin(["ACTUAL_REPORTS", "EXPECTED_REPORTS", "ACTUAL_REPORTS_ON_TIME"]))
+            ].copy()
+
+            # Use dictionary mappings to replace UIDS, OrgUnits, COC and AOC..
+            df = apply_dataelement_mappings(datapoints_df=df, mappings=dataelement_mappings)
+            df = apply_rate_mappings(datapoints_df=df, mappings=rate_mappings)
+            df = apply_acm_mappings(datapoints_df=df, mappings=acm_mappings)
+
+            # Set values of 'INDICATOR' to INT. Otherwise is ignored by DHIS2
+            df.loc[df.data_type == "INDICATOR", "value"] = df.loc[df.data_type == "INDICATOR", "value"].apply(
+                lambda x: str(int(float(x)))
+            )
+
             # mandatory fields in the input dataset
             mandatory_fields = [
                 "dx_uid",
@@ -399,14 +419,7 @@ def push_extracts(
                 "attribute_option_combo",
                 "value",
             ]
-            df = extract_data[mandatory_fields]
-            # NOTE: FILTER: DO NOT PUSH THESE RATES, NOT USED!
-            df = df[~(df.rate_type.isin(["ACTUAL_REPORTS", "EXPECTED_REPORTS", "ACTUAL_REPORTS_ON_TIME"]))]
-
-            # Use dictionary mappings to replace UIDS, OrgUnits, COC and AOC..
-            df = apply_dataelement_mappings(datapoints_df=df, mappings=data_mappings)
-            df = apply_rate_mappings(datapoints_df=df, mappings=rate_mappings)
-            df = apply_acm_mappings(datapoints_df=df, mappings=acm_mappings)
+            df = df[mandatory_fields]
 
             # Sort the dataframe by org_unit to reduce the time (hopefully)
             df = df.sort_values(by=["org_unit"], ascending=True)
@@ -464,39 +477,14 @@ def push_extracts(
         raise Exception(f"Analytic extracts task error: {e}")
 
 
-# def configure_login(logs_path: str, task_name: str):
-#     # Configure logging
-#     now = datetime.now().strftime("%Y-%m-%d-%H_%M")
-#     logging.basicConfig(
-#         filename=os.path.join(logs_path, f"{task_name}_{now}.log"),
-#         level=logging.INFO,
-#         format="%(asctime)s - %(message)s",
-#     )
-
-
 def configure_login(logs_path: str, task_name: str):
-    """
-    Configure logging to write logs to a file with real-time flushing.
-
-    Args:
-        logs_path (str): The directory path where logs should be stored.
-        task_name (str): The task name to include in the log filename.
-    """
+    # Configure logging
     now = datetime.now().strftime("%Y-%m-%d-%H_%M")
-    log_file = os.path.join(logs_path, f"{task_name}_{now}.log")
-
-    # Set up logging with a FileHandler
-    file_handler = logging.FileHandler(log_file)
-    file_handler.setLevel(logging.INFO)
-    file_handler.setFormatter(logging.Formatter("%(asctime)s - %(message)s"))
-
-    # Get the root logger and add the handler
-    logger = logging.getLogger()
-    logger.setLevel(logging.INFO)
-    logger.addHandler(file_handler)
-
-    # Ensure logs are flushed immediately
-    file_handler.flush = lambda: file_handler.stream.flush()
+    logging.basicConfig(
+        filename=os.path.join(logs_path, f"{task_name}_{now}.log"),
+        level=logging.INFO,
+        format="%(asctime)s - %(message)s",
+    )
 
 
 def log_summary_errors(summary: dict):
@@ -931,6 +919,7 @@ def apply_dataelement_mappings(datapoints_df: pd.DataFrame, mappings: dict) -> p
     All matching ids will be replaced.
     Is user responsability to provide the correct UIDS.
     """
+    datapoints_df = datapoints_df.copy()
     uids_to_replace = set(datapoints_df["dx_uid"]).intersection(mappings.get("UIDS", {}).keys())
     if len(uids_to_replace) > 0:
         current_run.log_info(f"{len(uids_to_replace)} OU UIDS to be replaced using mappings.")
@@ -954,7 +943,7 @@ def apply_dataelement_mappings(datapoints_df: pd.DataFrame, mappings: dict) -> p
         mappings.get("CAT_OPTION_COMBO", {}).keys()
     )
     if len(coc_to_replace) > 0:
-        current_run.log_info(f"{len(coc_to_replace)} of COC will be replaced using mappings.")
+        current_run.log_info(f"{len(coc_to_replace)} data elements COC will be replaced using mappings.")
         datapoints_df.loc[:, "category_option_combo"] = datapoints_df["category_option_combo"].replace(
             mappings.get("CAT_OPTION_COMBO", {})
         )
@@ -970,7 +959,7 @@ def apply_dataelement_mappings(datapoints_df: pd.DataFrame, mappings: dict) -> p
         mappings.get("ATTR_OPTION_COMBO", {}).keys()
     )
     if len(aoc_to_replace) > 0:
-        current_run.log_info(f"{len(aoc_to_replace)} of AOC will be replaced using mappings.")
+        current_run.log_info(f"{len(aoc_to_replace)} data elements AOC will be replaced using mappings.")
         datapoints_df.loc[:, "attribute_option_combo"] = datapoints_df["attribute_option_combo"].replace(
             mappings.get("ATTR_OPTION_COMBO", {})
         )
@@ -980,7 +969,7 @@ def apply_dataelement_mappings(datapoints_df: pd.DataFrame, mappings: dict) -> p
 
 def apply_rate_mappings(datapoints_df: pd.DataFrame, mappings: dict) -> pd.DataFrame:
     """
-    this is a specific code to map the rate mapings
+    this is a specific code to map the rate
 
     All matching ids (keys) will be replaced.
     Is user responsability to provide the correct UIDS.
@@ -999,6 +988,7 @@ def apply_rate_mappings(datapoints_df: pd.DataFrame, mappings: dict) -> pd.DataF
 
 def apply_acm_mappings(datapoints_df: pd.DataFrame, mappings: dict) -> pd.DataFrame:
     """
+    this is a specific code to map the indicator acm
     All matching ids will be replaced.
     Is user responsability to provide the correct UIDS.
     """
@@ -1012,7 +1002,7 @@ def apply_acm_mappings(datapoints_df: pd.DataFrame, mappings: dict) -> pd.DataFr
     coc_default = mappings["CAT_OPTION_COMBO"].get("DEFAULT", None)
     if coc_default and len(uids_acm_to_replace) > 0:
         current_run.log_info(f"Using {coc_default} default COC id mapping on ACM.")
-        print(f"Using {coc_default} default COC id mapping on ACM.")
+        # print(f"Using {coc_default} default COC id mapping on ACM.")
         datapoints_df.loc[datapoints_df.dx_uid.isin(mappings.get("UIDS", {}).values()), "category_option_combo"] = (
             coc_default
         )
