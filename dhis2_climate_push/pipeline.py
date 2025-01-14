@@ -552,8 +552,6 @@ def push_orgunits_update(
     orgUnit_source_f = orgUnit_source[comparison_cols]
     orgUnit_target_f = orgUnit_target[comparison_cols]
 
-    count_diff = 0
-
     errors_count = 0
     updates_count = 0
     progress_count = 0
