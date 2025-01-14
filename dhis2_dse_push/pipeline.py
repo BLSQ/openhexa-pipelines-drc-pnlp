@@ -110,18 +110,10 @@ def organisation_units_alignment(root: str, dhis2_client_target: DHIS2, config: 
 
     # Check DSE vs SNIS pyramid first!
     try:
-        # Load pyramid from source (snis)
-        connection_name = config["DSE_PUSH_SETTINGS"]["DHIS2_CONNECTION_SOURCE"]
-        connection = workspace.dhis2_connection(connection_name)
-        dhis2_source_client = DHIS2(connection=connection, cache_dir=None)
-
-        # Load pyramid from SNIS
-        pyramid_lvl_3 = dhis2_source_client.meta.organisation_units(
-            filter="level:le:3", fields="id,name,shortName,openingDate,closedDate,parent,level,geometry"
-        )
-        pyramid_lvl_3 = pd.DataFrame(pyramid_lvl_3)
-        source_pyramid_provinces = pyramid_lvl_3[pyramid_lvl_3.level == 2]  # Provinces
-        source_pyramid_zs = pyramid_lvl_3[pyramid_lvl_3.level == 3]  # Zones de sante
+        # Load pyramids from SNIS
+        connection_string = config["DSE_PUSH_SETTINGS"]["DHIS2_CONNECTION_SOURCE"]
+        source_pyramid_provinces = get_pyramid_for_level(connection_str=connection_string, pyramid_lvl=2)  # provinces
+        source_pyramid_zs = get_pyramid_for_level(connection_str=connection_string, pyramid_lvl=3)  # zs
 
         # Load DSE Database and completude to check the pyramids agains the SNIS pyramid (they should match).
         # We run the DSE process considering the SNIS pyramid in first place, so it would be rare that we might
@@ -144,14 +136,14 @@ def organisation_units_alignment(root: str, dhis2_client_target: DHIS2, config: 
             for d in zs_diffs:
                 matching_rows = dse_database_data_map[dse_database_data_map.zone_id_DHIS2 == d]
                 current_run.log_error(
-                    f"The Zone de Santé {matching_rows.iloc[0].Nom} ({matching_rows.iloc[0].zone_id_DHIS2}) can not be found in the source pyramid {connection.url}."
+                    f"The Zone de Santé {matching_rows.iloc[0].Nom} ({matching_rows.iloc[0].zone_id_DHIS2}) can not be found in the source pyramid {connection_string}."
                 )
             current_run.log_info(
                 "Add organisation unit UID mappings to the configuration file SOURCE_MAPPINGS > PNLP_DSE_PALU_MAPPING > ZONE_DE_SANTE_UID list"
             )
             current_run.log_info(f"Configuration path: {os.path.join(root, 'config','pnlp_dse_push_config.json')}")
             raise ValueError
-        current_run.log_info(f"DSE organisation unit (Zones de Santé) match against {connection_name} pyramid.")
+        current_run.log_info(f"DSE organisation unit (Zones de Santé) match against {connection_string} pyramid.")
 
         # provinces (COMPLETUDE requires check by name)
         source_province_names = set(source_pyramid_provinces.name)
@@ -169,17 +161,19 @@ def organisation_units_alignment(root: str, dhis2_client_target: DHIS2, config: 
             )
             current_run.log_info(f"Configuration path: {os.path.join(root, 'config','pnlp_dse_push_config.json')}")
             raise ValueError
-        current_run.log_info(f"DSE organisation unit (Provinces) match against {connection_name} pyramid.")
+        current_run.log_info(f"DSE organisation unit (Provinces) match against {connection_string} pyramid.")
 
     except ValueError:
         raise
     except Exception as e:
         raise Exception(
-            f"An error occurred while checking org units alignment against source {connection_name}. Error: {e}"
+            f"An error occurred while checking org units alignment against source {connection_string}. Error: {e}"
         )
 
-    orgUnit_source = pyramid_lvl_3  # re assign to reuse the same code..
+    # -------------Start alignment-------------
+    orgUnit_source = source_pyramid_zs.copy()  # re assign to reuse the same code..
 
+    # logs
     report_path = os.path.join(root, "logs", "organisation_units")
     os.makedirs(report_path, exist_ok=True)
     configure_login(logs_path=report_path, task_name="organisation_units")
@@ -294,6 +288,9 @@ def pnlp_dse_database_push(pipeline_path: str, dhis2_client_target: DHIS2, confi
         dse_database_data = dse_database_data[dse_database_data.Date >= last_pushed_date]
 
         # we should use the same source (snis) ID mappings for pushing.
+        # At this point (after OU alignment) the names should be correct.
+        # This is why is not necessary to apply ORG_UNIT mappings using TARGET_MAPPINGS config.
+        # This is only to keep the mapping between SNIS <> DSE.
         dse_database_data_map = apply_source_mappings_for_dse_data(
             dse_database_data, config["SOURCE_MAPPINGS"]["PNLP_DSE_PALU_MAPPING"], dataset="dse_database"
         )
@@ -376,7 +373,7 @@ def pnlp_completude_push(pipeline_path: str, dhis2_client_target: DHIS2, config:
         # Load DSE completude data from DB table
         dse_completude_data = load_db_table_data(table_name=table_name)
 
-        # Add columns period, period_date
+        # Add columns period and period_date
         dse_completude_data["period"] = (
             dse_completude_data["year"].astype(str) + "W" + dse_completude_data["NUMSEM"].astype(str)
         )
@@ -398,7 +395,9 @@ def pnlp_completude_push(pipeline_path: str, dhis2_client_target: DHIS2, config:
 
         # Get OU ids and merge the new column
         current_run.log_info("Adding OU ids to completude table.")
-        source_pyramid_provinces = get_ou_uid_for_level(config, pyramid_lvl=2)  # provinces
+        source_pyramid_provinces = get_pyramid_for_level(
+            connection_str=config["DSE_PUSH_SETTINGS"]["DHIS2_CONNECTION_SOURCE"], pyramid_lvl=2
+        )  # provinces
         dse_completude_data_m = dse_completude_data_f.merge(
             source_pyramid_provinces[["name", "id"]], left_on="province_ref", right_on="name", how="left"
         )
@@ -448,39 +447,14 @@ def pnlp_completude_push(pipeline_path: str, dhis2_client_target: DHIS2, config:
         raise
 
 
-# def configure_login(logs_path: str, task_name: str):
-#     # Configure logging
-#     now = datetime.now().strftime("%Y-%m-%d-%H_%M")
-#     logging.basicConfig(
-#         filename=os.path.join(logs_path, f"{task_name}_{now}.log"),
-#         level=logging.INFO,
-#         format="%(asctime)s - %(message)s",
-#     )
-
-
 def configure_login(logs_path: str, task_name: str):
-    """
-    Configure logging to write logs to a file with real-time flushing.
-
-    Args:
-        logs_path (str): The directory path where logs should be stored.
-        task_name (str): The task name to include in the log filename.
-    """
+    # Configure logging
     now = datetime.now().strftime("%Y-%m-%d-%H_%M")
-    log_file = os.path.join(logs_path, f"{task_name}_{now}.log")
-
-    # Set up logging with a FileHandler
-    file_handler = logging.FileHandler(log_file)
-    file_handler.setLevel(logging.INFO)
-    file_handler.setFormatter(logging.Formatter("%(asctime)s - %(message)s"))
-
-    # Get the root logger and add the handler
-    logger = logging.getLogger()
-    logger.setLevel(logging.INFO)
-    logger.addHandler(file_handler)
-
-    # Ensure logs are flushed immediately
-    file_handler.flush = lambda: file_handler.stream.flush()
+    logging.basicConfig(
+        filename=os.path.join(logs_path, f"{task_name}_{now}.log"),
+        level=logging.INFO,
+        format="%(asctime)s - %(message)s",
+    )
 
 
 # helper
@@ -683,10 +657,10 @@ def select_transform_to_json(data_values: pd.DataFrame):
     return valid, not_valid, to_delete
 
 
-def get_ou_uid_for_level(config, pyramid_lvl):
+def get_pyramid_for_level(connection_str: str, pyramid_lvl: int):
     try:
         # Set parameters
-        connection = workspace.dhis2_connection(config["DSE_PUSH_SETTINGS"]["DHIS2_CONNECTION_SOURCE"])
+        connection = workspace.dhis2_connection(connection_str)
         dhis2_source_client = DHIS2(connection=connection, cache_dir=None)
         # Retrieve province pyramid
         pyramid_lvl_selection = dhis2_source_client.meta.organisation_units(
