@@ -309,15 +309,6 @@ def precipitation_push(pipeline_path: str, dhis2_client_target: DHIS2, config: d
         raise
 
 
-# def new_func(report_path, datapoints_not_valid):
-#     if len(datapoints_not_valid) > 0:
-#         current_run.log_info(
-#             f"{len(datapoints_not_valid)} datapoints will be ignored. Please check the report for details {report_path}"
-#         )
-#         for i, error in enumerate(datapoints_not_valid, start=1):
-#             logging.error(f"{i} DataElement ignored: {error}")
-
-
 @dhis2_climate_push.task
 def tempareture_min_push(pipeline_path: str, dhis2_client_target: DHIS2, config: dict, success: bool) -> bool:
     """Put some data processing code here."""
@@ -573,16 +564,9 @@ def push_orgunits_update(
         # get cols with differences
         diff_fields = source[~((source == target) | (source.isna() & target.isna()))]
 
-        # If there are differences update!
+        # If there are differences then update!
         if not diff_fields.empty:
             # add the ID for update
-
-            # DEBUG
-            if count_diff < 5:
-                count_diff = count_diff + 1
-                current_run.log_info(f"{id} - {diff_fields} - source:{source} | target:{target}")
-            ################ PUSH AGAIN
-
             source["id"] = id
             ou_update = OrgUnitObj(source)
             response = push_orgunit(
