@@ -122,7 +122,7 @@ def connect_to_dhis2(config: dict, cache_dir: str):
         connection = workspace.dhis2_connection(config["EXTRACT_SETTINGS"]["DHIS2_CONNECTION"])
         dhis2_client = DHIS2(connection=connection, cache_dir=cache_dir)
 
-        current_run.log_info(f'Connected to DHIS2 connection: {config["EXTRACT_SETTINGS"]["DHIS2_CONNECTION"]}')
+        current_run.log_info(f"Connected to DHIS2 connection: {config['EXTRACT_SETTINGS']['DHIS2_CONNECTION']}")
         return dhis2_client
     except Exception as e:
         raise Exception(f"Error while connecting to DHIS2 SNIS: {e}")
@@ -202,10 +202,11 @@ def extract_snis_population(pipeline_path: str, dhis2_snis_client: str, config: 
             periods=extract_periods,
         )
 
-        # format
+        # save raw dhis2 data
         population_table = pd.DataFrame(raw_pop_data)
-        population_table = map_to_snis_format(dhis_data=population_table, data_type="POPULATION")
-        save_to_parquet(population_table, filename=pop_fname)
+        # format and save
+        population_table_formatted = map_to_snis_format(dhis_data=population_table, data_type="POPULATION")
+        save_to_parquet(population_table_formatted, filename=pop_fname)
         current_run.log_info(f"SNIS DHIS2 population from {start} to {end} saved: {pop_fname}")
         return True
     except Exception as e:
@@ -240,7 +241,7 @@ def extract_snis_data(pipeline_path: str, config: dict, dhis2_snis_client: DHIS2
 
         # retrieve FOSA ids from SNIS
         fosa_list = retrieve_ou_list(dhis2_client=dhis2_snis_client, ou_level=5)
-        current_run.log_info(f'Download MODE: {config["EXTRACT_SETTINGS"]["MODE"]}')
+        current_run.log_info(f"Download MODE: {config['EXTRACT_SETTINGS']['MODE']}")
 
         # retrieve data
         for period in extract_periods:
