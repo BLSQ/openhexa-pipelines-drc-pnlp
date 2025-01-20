@@ -124,7 +124,7 @@ def connect_to_dhis2(config: dict, cache_dir: str):
     try:
         connection = workspace.dhis2_connection(config["PUSH_SETTINGS"]["DHIS2_CONNECTION"])
         dhis2_client = DHIS2(connection=connection, cache_dir=cache_dir)
-        current_run.log_info(f'Connected to DHIS2 connection: {config["PUSH_SETTINGS"]["DHIS2_CONNECTION"]}')
+        current_run.log_info(f"Connected to DHIS2 connection: {config['PUSH_SETTINGS']['DHIS2_CONNECTION']}")
         return dhis2_client
     except Exception as e:
         raise Exception(f"Error while connecting to DHIS2 {config['PUSH_SETTINGS']['DHIS2_CONNECTION']}: {e}")
@@ -503,7 +503,7 @@ def log_summary_errors(summary: dict):
         #     logging.error(f"Error {i}: {error}")
         #         logging.error(f"Logging {len(errors)} error(s) from export summary.")
         for i_e, error in enumerate(errors, start=1):
-            logging.error(f"Error {i_e} : HTTP request failed : {error.get('error',None)}")
+            logging.error(f"Error {i_e} : HTTP request failed : {error.get('error', None)}")
             error_response = error.get("response", None)
             if error_response:
                 rejected_list = error_response.pop("rejected_datapoints", [])
@@ -682,8 +682,6 @@ def push_orgunits_create(ou_df: pd.DataFrame, dhis2_client_target: DHIS2, report
         current_run.log_info(
             f"{errors_count} errors occurred during creation. Please check the latest execution report under {report_path}."
         )
-    else:
-        current_run.log_info("No new organisation units found.")
 
 
 def push_orgunits_update(
@@ -854,7 +852,7 @@ def push_data_elements(
 
         if (count * max_post) % 20000 == 0:
             current_run.log_info(
-                f'{count * max_post} / {total_datapoints} data points pushed summary: {summary["import_counts"]}'
+                f"{count * max_post} / {total_datapoints} data points pushed summary: {summary['import_counts']}"
             )
 
     return summary

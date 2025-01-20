@@ -11,6 +11,7 @@ from openhexa.toolbox.dhis2 import DHIS2
 
 import geopandas as gpd
 import ast
+from shapely.geometry import mapping
 
 
 @pipeline("dhis2-climate-push", name="dhis2_climate_push")
@@ -27,11 +28,13 @@ def dhis2_climate_push():
         pipeline_config = load_climate_config(pipeline_path=root_path)
 
         # connect to DHIS2
-        dhis2_client = connect_to_dhis2(config=pipeline_config, cache_dir=None)
+        dhis2_client = connect_to_dhis2_target(config=pipeline_config, cache_dir=None)
 
         # THIS PIPELINE SHOULD BE A SLAVE OF THE ERA5 PIPELINES EXECUTED FROM THERE
         # THE ERA5 PIPELINES WILL DOWNLOAD AND UPDATE THE SHAPES TABLE
         # THIS PIPELINE WILL MAKE THE ALIGNMENT USING THAT UPDATED TABLE
+
+        # NOTE: we could implement a check at the begining to execute only when there is new data..
 
         # Align pyramid
         pyramid_ready = push_organisation_units(
@@ -87,9 +90,9 @@ def load_climate_config(pipeline_path: str) -> dict:
 
 
 @dhis2_climate_push.task
-def connect_to_dhis2(config: dict, cache_dir: str):
+def connect_to_dhis2_target(config: dict, cache_dir: str):
     try:
-        conn_id = config["CLIMATE_PUSH_SETTINGS"].get("DHIS2_CONNECTION", None)
+        conn_id = config["CLIMATE_PUSH_SETTINGS"].get("DHIS2_CONNECTION_TARGET", None)
         if conn_id is None:
             current_run.log_error("DHIS2 connection is not provided.")
             raise ValueError
@@ -122,25 +125,28 @@ def push_organisation_units(root: str, dhis2_client_target: DHIS2, config: dict,
     configure_login(logs_path=report_path, task_name="organisation_units")
 
     # WE ALIGN ONLY THE ZONES DE SANTE USED FOR CLIMATE METRICS.
-    # Load pyramid from boundaries DB table (updated by era5_precipitation pipeline Zones de sante level only)
+    # Load pyramid from boundaries DB table (cod_iaso_zone_de_sante)
+    # (this table is updated by era5_precipitation pipeline Zones de sante level only)
     dbengine = create_engine(os.environ["WORKSPACE_DATABASE_URL"])
     cod_zs_boundaries_table = gpd.read_postgis(
         config["CLIMATE_PUSH_SETTINGS"]["BOUNDARIES_TABLE"], con=dbengine, geom_col="geometry"
     )
 
-    # Convert the geometry column to GeoJSON-like format
+    # Use 'mapping' to convert geometry to GeoJSON-like dictionary
     cod_zs_boundaries_table["geometry_json"] = cod_zs_boundaries_table["geometry"].apply(
-        lambda geom: geom.__geo_interface__ if geom else None
+        lambda x: json.dumps(mapping(x))
     )
     orgUnit_source = pd.DataFrame(cod_zs_boundaries_table.drop(columns=["geometry", "parent"]))
     orgUnit_source = orgUnit_source.rename(columns={"ref": "id", "ou_parent": "parent", "geometry_json": "geometry"})
-    orgUnit_source = orgUnit_source[["id", "name", "shortName", "openingDate", "closedDate", "parent", "geometry"]]
+    orgUnit_source = orgUnit_source[
+        ["id", "name", "shortName", "openingDate", "closedDate", "parent", "geometry"]
+    ]  # format
 
     # convert that column to dictionary if possible
     orgUnit_source["parent"] = orgUnit_source["parent"].apply(safe_eval)
 
     if orgUnit_source.shape[0] > 0:
-        # Retrieve the target (PNLP) orgUnits to compare
+        # Retrieve the target (NMDR/PNLP) orgUnits to compare
         current_run.log_info(f"Retrieving organisation units from target DHIS2 instance {dhis2_client_target.api.url}")
         orgUnit_target = dhis2_client_target.meta.organisation_units(
             fields="id,name,shortName,openingDate,closedDate,parent,level,path,geometry"
@@ -299,8 +305,17 @@ def precipitation_push(pipeline_path: str, dhis2_client_target: DHIS2, config: d
         logging.info(msg)
         log_summary_errors(summary)
 
-        # Save the last date pushed for precipitation
-        update_last_available_date_log(os.path.join(pipeline_path, "config"), "precipitation", precip_date_max)
+        # Check if all data points were correctly imported by DHIS2
+        dp_ignored = summary["import_counts"]["ignored"]
+        if dp_ignored > 0:
+            current_run.log_warning(
+                f"{dp_ignored} datapoints not imported. precipitation last push date is not updated: {last_pushed_date}"
+            )
+        else:
+            # Save the last date pushed for Temperature min
+            current_run.log_info(f"All {len(datapoints_valid)} datapoints correctly imported.")
+            # Save the last date pushed for precipitation
+            update_last_available_date_log(os.path.join(pipeline_path, "config"), "precipitation", precip_date_max)
 
         return True
 
@@ -420,8 +435,17 @@ def tempareture_min_push(pipeline_path: str, dhis2_client_target: DHIS2, config:
         logging.info(msg)
         log_summary_errors(summary)
 
-        # Save the last date pushed for Temperature min
-        update_last_available_date_log(os.path.join(pipeline_path, "config"), "temperature_min", temp_min_date_max)
+        # Check if all data points were correctly imported by DHIS2
+        dp_ignored = summary["import_counts"]["ignored"]
+        if dp_ignored > 0:
+            current_run.log_warning(
+                f"{dp_ignored} datapoints not imported. tempearture_min last push date is not updated: {last_pushed_date}"
+            )
+        else:
+            # Save the last date pushed for Temperature min
+            current_run.log_info(f"All {len(datapoints_valid)} datapoints correctly imported.")
+            # Save the last date pushed for Temperature min
+            update_last_available_date_log(os.path.join(pipeline_path, "config"), "temperature_min", temp_min_date_max)
 
         return True
 
@@ -549,16 +573,18 @@ def push_orgunits_update(
 
     # build id dictionary (faster) and compare on selected columns
     index_dictionary = build_id_indexes(orgUnit_source, orgUnit_target, matching_ou_ids)
-    orgUnit_source_f = orgUnit_source[comparison_cols]
-    orgUnit_target_f = orgUnit_target[comparison_cols]
+    # orgUnit_source_f = orgUnit_source[comparison_cols]
+    # orgUnit_target_f = orgUnit_target[comparison_cols]
+    orgUnit_source_f = orgUnit_source.loc[:, comparison_cols].copy()
+    orgUnit_target_f = orgUnit_target.loc[:, comparison_cols].copy()
 
     errors_count = 0
     updates_count = 0
     progress_count = 0
     for id, indices in index_dictionary.items():
         progress_count = progress_count + 1
-        source = orgUnit_source_f.iloc[indices["source"]]
-        target = orgUnit_target_f.iloc[indices["target"]]
+        source = orgUnit_source_f.iloc[indices["source"]].copy()
+        target = orgUnit_target_f.iloc[indices["target"]].copy()
         # get cols with differences
         diff_fields = source[~((source == target) | (source.isna() & target.isna()))]
 
@@ -743,13 +769,21 @@ def tempareture_max_push(pipeline_path: str, dhis2_client_target: DHIS2, config:
         logging.info(msg)
         log_summary_errors(summary)
 
-        # Save the last date pushed for Temperature min
-        update_last_available_date_log(os.path.join(pipeline_path, "config"), "temperature_max", temp_max_date_max)
+        # Check if all data points were correctly imported by DHIS2
+        dp_ignored = summary["import_counts"]["ignored"]
+        if dp_ignored > 0:
+            current_run.log_warning(
+                f"{dp_ignored} datapoints not imported. tempearture_max last push date is not updated: {last_pushed_date}"
+            )
+        else:
+            # Save the last date pushed for Temperature max
+            current_run.log_info(f"All {len(datapoints_valid)} datapoints correctly imported.")
+            update_last_available_date_log(os.path.join(pipeline_path, "config"), "temperature_max", temp_max_date_max)
 
         return True
 
     except Exception as e:
-        current_run.log_error(f"An error occurred while pushing temperature min data: {e}")
+        current_run.log_error(f"An error occurred while pushing temperature max data: {e}")
         raise
 
 
@@ -845,7 +879,7 @@ def to_dhis2_format_precipitation(
                 # current_run.log_info(
                 # f'UID: {row["dx_uid"]} period: {row["period"]} ou: {row["org_unit"]} value: {row["value"]}')
                 logging.info(
-                    f'UID: {row["dx_uid"]} period: {row["period"]} ou: {row["org_unit"]} value: {row["value"]}'
+                    f"UID: {row['dx_uid']} period: {row['period']} ou: {row['org_unit']} value: {row['value']}"
                 )
 
         # Set the absolute values under 0.0001 to 0.0001
@@ -951,7 +985,7 @@ def to_dhis2_format_temperature(
                 # current_run.log_info(
                 # f'UID: {row["dx_uid"]} period: {row["period"]} ou: {row["org_unit"]} value: {row["value"]}')
                 logging.info(
-                    f'UID: {row["dx_uid"]} period: {row["period"]} ou: {row["org_unit"]} value: {row["value"]}'
+                    f"UID: {row['dx_uid']} period: {row['period']} ou: {row['org_unit']} value: {row['value']}"
                 )
 
         # Set the absolute values under 0.0001 to 0.0001
@@ -1012,7 +1046,7 @@ def select_transform_to_json(data_values: pd.DataFrame):
         if dpoint.is_valid():
             valid.append(dpoint.to_json())
         elif dpoint.is_to_delete():
-            to_delete.append(dpoint.to_json())
+            to_delete.append(dpoint.is_to_delete())
         else:
             not_valid.append(row)  # row is the original data, not the json
     return valid, not_valid, to_delete
@@ -1075,9 +1109,11 @@ def push_data_elements(
 
         except requests.exceptions.RequestException as e:
             try:
-                response = r.json().get("response")
-            except (ValueError, AttributeError):
+                # response = r.json().get("response")
+                response = r.json().get("response") if r else None
+            except (ValueError, AttributeError) as un_err:
                 response = None
+                raise Exception(f"Unexpected error. Pipeline halted: {un_err} ")
 
             if response:
                 for key in ["imported", "updated", "ignored", "deleted"]:
@@ -1086,9 +1122,15 @@ def push_data_elements(
             error_response = get_response_value_errors(response, chunk=chunk)
             summary["ERRORS"].append({"error": e, "response": error_response})
 
+            # Stop the pipeline if the we have a server error.
+            if 500 <= response["httpStatusCode"] < 600:
+                raise Exception(
+                    f"Server error pipeline halted: {e} - {error_response} summary: {summary['import_counts']}"
+                )
+
         if (count * max_post) % 20000 == 0:
             current_run.log_info(
-                f'{count * max_post} / {total_datapoints} data points pushed summary: {summary["import_counts"]}'
+                f"{count * max_post} / {total_datapoints} data points pushed summary: {summary['import_counts']}"
             )
 
     return summary

@@ -12,6 +12,8 @@ from sqlalchemy import create_engine
 from openhexa.sdk import current_run, pipeline, workspace
 from openhexa.toolbox.dhis2 import DHIS2
 
+import numpy as np
+
 
 @pipeline("dhis2-dse-push", name="dhis2_dse_push")
 def dhis2_dse_push():
@@ -141,7 +143,7 @@ def organisation_units_alignment(root: str, dhis2_client_target: DHIS2, config: 
             current_run.log_info(
                 "Add organisation unit UID mappings to the configuration file SOURCE_MAPPINGS > PNLP_DSE_PALU_MAPPING > ZONE_DE_SANTE_UID list"
             )
-            current_run.log_info(f"Configuration path: {os.path.join(root, 'config','pnlp_dse_push_config.json')}")
+            current_run.log_info(f"Configuration path: {os.path.join(root, 'config', 'pnlp_dse_push_config.json')}")
             raise ValueError
         current_run.log_info(f"DSE organisation unit (Zones de Santé) match against {connection_string} pyramid.")
 
@@ -159,7 +161,7 @@ def organisation_units_alignment(root: str, dhis2_client_target: DHIS2, config: 
             current_run.log_info(
                 "Add province name mappings to the configuration SOURCE_MAPPINGS > PNLP_DSE_COMPLETUDE_MAPPING > PROVINCE_NAMES list"
             )
-            current_run.log_info(f"Configuration path: {os.path.join(root, 'config','pnlp_dse_push_config.json')}")
+            current_run.log_info(f"Configuration path: {os.path.join(root, 'config', 'pnlp_dse_push_config.json')}")
             raise ValueError
         current_run.log_info(f"DSE organisation unit (Provinces) match against {connection_string} pyramid.")
 
@@ -171,7 +173,7 @@ def organisation_units_alignment(root: str, dhis2_client_target: DHIS2, config: 
         )
 
     # -------------Start alignment-------------
-    orgUnit_source = source_pyramid_zs.copy()  # re assign to reuse the same code..
+    orgUnit_source = pd.concat([source_pyramid_provinces, source_pyramid_zs])
 
     # logs
     report_path = os.path.join(root, "logs", "organisation_units")
@@ -181,7 +183,6 @@ def organisation_units_alignment(root: str, dhis2_client_target: DHIS2, config: 
     if orgUnit_source.shape[0] > 0:
         # Retrieve the target (PNLP) orgUnits to compare
         current_run.log_info(f"Retrieving organisation units from target DHIS2 instance {dhis2_client_target.api.url}")
-        # orgUnit_target = dhis2_client_target.meta.organisation_units_extra_fields()
         orgUnit_target = dhis2_client_target.meta.organisation_units(
             fields="id,name,shortName,openingDate,closedDate,parent,level,path,geometry"
         )
@@ -274,7 +275,16 @@ def pnlp_dse_database_push(pipeline_path: str, dhis2_client_target: DHIS2, confi
 
         # Load DSE database PALU_TOT data from DB table
         dse_database_data = load_db_table_data(table_name=table_name)
-        dse_date_max = dse_database_data.Date.max().strftime("%Y-%m-%d")
+
+        # Add date columns and use combination of year+NUMSEM for period weeks
+        dse_database_data["year"] = dse_database_data["year"].apply(lambda x: str(int(float(x))))
+        dse_database_data["period"] = (
+            dse_database_data["year"].astype(str) + "W" + dse_database_data["NUMSEM"].astype(str)
+        )
+        dse_database_data["period_date"] = dse_database_data["period"].apply(lambda x: week_to_date(x))
+
+        # Get max period_date available
+        dse_date_max = dse_database_data.period_date.max()
         current_run.log_info(
             f"Last DSE database pushed date {last_pushed_date} - DSE table data available until : {dse_date_max}"
         )
@@ -284,7 +294,9 @@ def pnlp_dse_database_push(pipeline_path: str, dhis2_client_target: DHIS2, confi
 
         # SELECT data to PUSH using last_pushed_date
         last_pushed_date = subtract_months(last_pushed_date, months_overlap)  # APPLY LAG
-        current_run.log_info(f"Pushing new DSE database data from : {last_pushed_date} (overlap: {months_overlap})")
+        current_run.log_info(
+            f"Pushing DSE database data ({table_name}) from : {last_pushed_date} (overlap: -{months_overlap})"
+        )
         dse_database_data = dse_database_data[dse_database_data.Date >= last_pushed_date]
 
         # we should use the same source (snis) ID mappings for pushing.
@@ -302,15 +314,38 @@ def pnlp_dse_database_push(pipeline_path: str, dhis2_client_target: DHIS2, confi
         # Also not necessary if the alignment was successful...
 
         # transform in a list of json dataElements (NA values were filtered in Cas and Deces in to_dhis2_format_dse_db())
-        datapoints_valid, datapoints_not_valid, _ = select_transform_to_json(data_values=dse_database_data_formatted)
+        datapoints_valid, datapoints_not_valid, datapoints_to_na = select_transform_to_json(
+            data_values=dse_database_data_formatted
+        )
 
         # log not valid datapoints (if any)
-        log_ignored(report_path=report_path, datapoint_list=datapoints_not_valid, data_type="dse_database")
+        log_ignored_or_na(report_path=report_path, datapoint_list=datapoints_not_valid, data_type="dse_database")
 
         # push data..
         current_run.log_info(
             f"Pushing DSE database data with parameters import_strategy: {import_strategy}, dry_run: {dry_run}, max_post: {max_post}"
         )
+        # datapoints set to NA
+        if len(datapoints_to_na) > 0:
+            log_ignored_or_na(
+                report_path=report_path, datapoint_list=datapoints_to_na, data_type="dse_database", is_na=True
+            )
+            summary_na = push_data_elements(
+                dhis2_client=dhis2_client_target,
+                data_elements_list=datapoints_to_na,  # different json format for deletion see: DataPoint class to_delete_json()
+                strategy=import_strategy,
+                dry_run=dry_run,
+                max_post=max_post,
+            )
+
+            # log info
+            msg = f"Data elements delete summary:  {summary_na['import_counts']}"
+            current_run.log_info(msg)
+            logging.info(msg)
+            log_summary_errors(summary_na)
+        #
+
+        # Push valid data
         summary = push_data_elements(
             dhis2_client=dhis2_client_target,
             data_elements_list=datapoints_valid,
@@ -325,8 +360,17 @@ def pnlp_dse_database_push(pipeline_path: str, dhis2_client_target: DHIS2, confi
         logging.info(msg)
         log_summary_errors(summary)
 
-        # Save the last date pushed for DSE db
-        update_last_available_date_log(os.path.join(pipeline_path, "config"), "dse_database", dse_date_max)
+        # Check if all data points were correctly imported by DHIS2
+        dp_ignored = summary["import_counts"]["ignored"]
+        if dp_ignored > 0:
+            current_run.log_warning(
+                f"{dp_ignored} datapoints not imported. dse_database last push date is not updated: {last_pushed_date}"
+            )
+        else:
+            # Save the last date pushed for Temperature max
+            current_run.log_info(f"All {len(datapoints_valid)} datapoints correctly imported.")
+            # Save the last date pushed for DSE db
+            update_last_available_date_log(os.path.join(pipeline_path, "config"), "dse_database", dse_date_max)
         return True
 
     except Exception as e:
@@ -379,8 +423,8 @@ def pnlp_completude_push(pipeline_path: str, dhis2_client_target: DHIS2, config:
         )
         dse_completude_data["period_date"] = dse_completude_data["period"].apply(lambda x: week_to_date(x))
 
-        # Get max date available
-        dse_date_max = dse_completude_data.period_date.max().strftime("%Y-%m-%d")
+        # Get max period_date available
+        dse_date_max = dse_completude_data.period_date.max()
         current_run.log_info(
             f"Last DSE completude pushed date {last_date_pushed} - DSE completude data available until : {dse_date_max}"
         )
@@ -388,13 +432,13 @@ def pnlp_completude_push(pipeline_path: str, dhis2_client_target: DHIS2, config:
             current_run.log_info("No new DSE completude data to push.")
             return True  # Exit!
 
-        # # SELECT data to PUSH using last_pushed_date
+        # SELECT data to PUSH using last_pushed_date
         last_date_pushed = subtract_months(last_date_pushed, months_overlap)  # APPLY LAG?
-        current_run.log_info(f"Pushing new DSE completude data from : {last_date_pushed} (overlap: {months_overlap})")
-        dse_completude_data_f = dse_completude_data[dse_completude_data.period_date >= last_date_pushed]
+        current_run.log_info(f"Pushing new DSE completude data from : {last_date_pushed} (overlap: -{months_overlap})")
+        dse_completude_data_f = dse_completude_data[dse_completude_data.period_date >= last_date_pushed].copy()
 
-        # Get OU ids and merge the new column
-        current_run.log_info("Adding OU ids to completude table.")
+        # ADD province OU ids (merge new column)
+        current_run.log_info("Adding Province ids to completude table.")
         source_pyramid_provinces = get_pyramid_for_level(
             connection_str=config["DSE_PUSH_SETTINGS"]["DHIS2_CONNECTION_SOURCE"], pyramid_lvl=2
         )  # provinces
@@ -409,21 +453,47 @@ def pnlp_completude_push(pipeline_path: str, dhis2_client_target: DHIS2, config:
         )
 
         # reformat data to DHIS2 push format...
-        dse_completude_data_formatted = to_dhis2_format_dse_completude(dse_data=dse_database_data_map, config=config)
+        dse_completude_data_formatted = to_dhis2_format_dse_completude(
+            dse_completude_data=dse_database_data_map, config=config
+        )
 
         # We don't apply further mappings for NMDR
         # Also not necessary if the alignment was successful...
 
         # transform in a list of json dataElements (NA values were filtered in Cas and Deces in to_dhis2_format_dse_db())
-        datapoints_valid, datapoints_not_valid, _ = select_transform_to_json(data_values=dse_completude_data_formatted)
+        datapoints_valid, datapoints_not_valid, datapoints_to_na = select_transform_to_json(
+            data_values=dse_completude_data_formatted
+        )
 
         # log not valid datapoints (if any)
-        log_ignored(report_path=report_path, datapoint_list=datapoints_not_valid, data_type="dse_completude")
+        log_ignored_or_na(report_path=report_path, datapoint_list=datapoints_not_valid, data_type="dse_completude")
 
         # push data
         current_run.log_info(
             f"Pushing DSE completude data with parameters import_strategy: {import_strategy}, dry_run: {dry_run}, max_post: {max_post}"
         )
+
+        # datapoints set to NA
+        if len(datapoints_to_na) > 0:
+            log_ignored_or_na(
+                report_path=report_path, datapoint_list=datapoints_to_na, data_type="dse_completude", is_na=True
+            )
+            summary_na = push_data_elements(
+                dhis2_client=dhis2_client_target,
+                data_elements_list=datapoints_to_na,  # different json format for deletion see: DataPoint class to_delete_json()
+                strategy=import_strategy,
+                dry_run=dry_run,
+                max_post=max_post,
+            )
+
+            # log info
+            msg = f"Data elements delete summary:  {summary_na['import_counts']}"
+            current_run.log_info(msg)
+            logging.info(msg)
+            log_summary_errors(summary_na)
+        #
+
+        # push valid datapints
         summary = push_data_elements(
             dhis2_client=dhis2_client_target,
             data_elements_list=datapoints_valid,
@@ -438,8 +508,17 @@ def pnlp_completude_push(pipeline_path: str, dhis2_client_target: DHIS2, config:
         logging.info(msg)
         log_summary_errors(summary)
 
-        # Save the last date pushed for DSE db
-        update_last_available_date_log(os.path.join(pipeline_path, "config"), "dse_completude", dse_date_max)
+        # Check if all data points were correctly imported by DHIS2
+        dp_ignored = summary["import_counts"]["ignored"]
+        if dp_ignored > 0:
+            current_run.log_warning(
+                f"{dp_ignored} datapoints not imported. dse_completude last push date is not updated: {last_date_pushed}"
+            )
+        else:
+            # Save the last date pushed for Temperature max
+            current_run.log_info(f"All {len(datapoints_valid)} datapoints correctly imported.")
+            # Save the last date pushed for DSE db
+            update_last_available_date_log(os.path.join(pipeline_path, "config"), "dse_completude", dse_date_max)
 
         return True
     except Exception as e:
@@ -651,7 +730,7 @@ def select_transform_to_json(data_values: pd.DataFrame):
         if dpoint.is_valid():
             valid.append(dpoint.to_json())
         elif dpoint.is_to_delete():
-            to_delete.append(dpoint.to_json())
+            to_delete.append(dpoint.to_delete_json())
         else:
             not_valid.append(row)  # row is the original data, not the json
     return valid, not_valid, to_delete
@@ -680,7 +759,6 @@ def get_pyramid_for_level(connection_str: str, pyramid_lvl: int):
 def to_dhis2_format_dse_completude(
     dse_completude_data: pd.DataFrame,
     config: dict,
-    report_path: str = "",
 ) -> pd.DataFrame:
     """
     Maps DSE data to a standardized DHIS2 data table.
@@ -705,7 +783,7 @@ def to_dhis2_format_dse_completude(
     # SET NA VALUES TO 0
     for c in uid_mappings.keys():
         if dse_completude_data[c].isna().any():
-            print(f"NaN values found DSE Completude in column: {c} replacing to 0.")
+            # current_run.log_info(f"NaN values found DSE Completude in column: {c} replacing to 0.")
             dse_completude_data[c] = dse_completude_data[c].fillna(0)
 
     try:
@@ -714,11 +792,7 @@ def to_dhis2_format_dse_completude(
             dhis2_format_sub = pd.DataFrame(index=dse_completude_data.index)
             dhis2_format_sub["data_type"] = "DSE_COMPLETUDE"
             dhis2_format_sub["dx_uid"] = uid_value
-            dhis2_format_sub["period"] = (
-                dse_completude_data["year"].astype(int).astype(str)
-                + "W"
-                + dse_completude_data["NUMSEM"].astype(int).astype(str)
-            )  # .str.zfill(2) for: ISO 8601
+            dhis2_format_sub["period"] = dse_completude_data["period"]
             dhis2_format_sub["org_unit"] = dse_completude_data["id"]
             dhis2_format_sub["category_option_combo"] = coc_default
             dhis2_format_sub["attribute_option_combo"] = aoc_default
@@ -728,8 +802,9 @@ def to_dhis2_format_dse_completude(
             temp_table.append(dhis2_format_sub)
 
         dhis2_format = pd.concat(temp_table, ignore_index=True)
-        # Ensure all values are numeric
+        # Ensure all values are numeric or set to None
         dhis2_format["value"] = pd.to_numeric(dhis2_format["value"], errors="coerce")
+        dhis2_format["value"] = dhis2_format["value"].replace({np.nan: None})
         # sorting might improve speed
         dhis2_format = dhis2_format.sort_values(by=["org_unit"], ascending=True)
         return dhis2_format
@@ -850,7 +925,6 @@ def push_data_elements(
     for chunk in split_list(data_elements_list, max_post):
         count = count + 1
         try:
-            # chunk_period = min(list(set(c.get("period") for c in chunk)))
             r = dhis2_client.api.session.post(
                 f"{dhis2_client.api.url}/dataValueSets",
                 json={"dataValues": chunk},
@@ -884,20 +958,26 @@ def push_data_elements(
 
         except requests.exceptions.RequestException as e:
             try:
-                response = r.json().get("response")
+                response = r.json().get("response") if r else None
             except (ValueError, AttributeError):
                 response = None
 
             if response:
                 for key in ["imported", "updated", "ignored", "deleted"]:
-                    summary["import_counts"][key] += response["importCount"][key]
+                    summary["import_counts"][key] += response.get("importCount", {}).get(key, 0)
 
             error_response = get_response_value_errors(response, chunk=chunk)
             summary["ERRORS"].append({"error": e, "response": error_response})
 
+            # Stop the pipeline if the we have a server error.
+            if r and 500 <= r.status_code < 600:
+                raise Exception(
+                    f"Server error pipeline halted: {e} - {error_response} summary: {summary['import_counts']}"
+                )
+
         if ((count * max_post) % 20000) == 0:
             current_run.log_info(
-                f'{count * max_post} / {total_datapoints} data points pushed summary: {summary["import_counts"]}'
+                f"{count * max_post} / {total_datapoints} data points pushed summary: {summary['import_counts']}"
             )
 
     return summary
@@ -1019,7 +1099,7 @@ def update_last_available_date_log(
     with open(file_path, "w") as f:
         json.dump(data, f, indent=4)
 
-    current_run.log_info(f"Updated {node} with date {iso_date} in {file_path}.")
+    current_run.log_info(f"Updated {node} with start of week date {iso_date} in {file_path}.")
 
 
 def to_dhis2_format_dse_db(
@@ -1060,9 +1140,8 @@ def to_dhis2_format_dse_db(
         current_run.log_error(f"The CAT_OPTION_COMBO UIDS have None values: {', '.join(missing_keys)}")
         raise ValueError
 
-    # FILTER NA VALUES
-    dse_data_f = dse_data[dse_data["Cas"].notna() & dse_data["Deces"].notna()]
-    dse_data_f = dse_data_f[dse_data_f["MALADIE"] == "PALUDISME"]  # make sure
+    # dse_data_f = dse_data[dse_data["Cas"].notna() & dse_data["Deces"].notna()] # we push NAs also
+    dse_data_f = dse_data[dse_data["MALADIE"] == "PALUDISME"]  # make sure is the correct disease
 
     try:
         temp_table = []
@@ -1076,9 +1155,7 @@ def to_dhis2_format_dse_db(
                 dhis2_format_sub = pd.DataFrame(index=df_data_coc.index)
                 dhis2_format_sub["data_type"] = f"DSE_PALU_{uid_key.upper()}"
                 dhis2_format_sub["dx_uid"] = uid_value
-                dhis2_format_sub["period"] = (
-                    df_data_coc["year"].astype(int).astype(str) + "W" + df_data_coc["NUMSEM"].astype(int).astype(str)
-                )  # .str.zfill(2) for: ISO 8601
+                dhis2_format_sub["period"] = df_data_coc["period"]
                 dhis2_format_sub["org_unit"] = df_data_coc["zone_id_DHIS2"]
                 dhis2_format_sub["category_option_combo"] = coc_value
                 dhis2_format_sub["attribute_option_combo"] = aoc_default
@@ -1088,11 +1165,11 @@ def to_dhis2_format_dse_db(
                 temp_table.append(dhis2_format_sub)
 
         dhis2_format = pd.concat(temp_table, ignore_index=True)
-        # Ensure all values are numeric
+        # Ensure all values are numeric or set to None
         dhis2_format["value"] = pd.to_numeric(dhis2_format["value"], errors="coerce")
-
+        dhis2_format["value"] = dhis2_format["value"].replace({np.nan: None})
         # sorting might improve speed
-        dhis2_format = dhis2_format.sort_values(by=["org_unit", "period"], ascending=True)
+        dhis2_format = dhis2_format.sort_values(by=["org_unit"], ascending=True)
         return dhis2_format
 
     except AttributeError as e:
@@ -1132,9 +1209,15 @@ def week_to_date(week_str: str) -> str:
     year = int(week_str[:4])
     week = int(week_str[5:])
 
-    # Calculate the start date of the ISO week (Monday of the given week)
+    # Calculate the first day of the first week of the year
     first_day_of_year = datetime(year, 1, 1)
-    first_week_start = first_day_of_year - timedelta(days=first_day_of_year.weekday())
+
+    # Adjust for the first Thursday rule
+    first_week_start = first_day_of_year - timedelta(days=first_day_of_year.weekday())  # Monday of the first ISO week
+    if first_day_of_year.weekday() > 3:
+        first_week_start += timedelta(weeks=1)
+
+    # Calculate the start of the given week
     start_of_week = first_week_start + timedelta(weeks=week - 1)
 
     # Return the date as a string in 'YYYY-MM-DD' format
@@ -1164,14 +1247,16 @@ def log_summary_errors(summary: dict):
 
 
 # log ignored datapoints in the report
-def log_ignored(report_path, datapoint_list, data_type="dse_database", is_na=False):
+def log_ignored_or_na(report_path, datapoint_list, data_type="dse_database", is_na=False):
     if len(datapoint_list) > 0:
         current_run.log_info(
-            f"{len(datapoint_list)} datapoints will be ignored. Please check the report for details {report_path}"
+            f"{len(datapoint_list)} datapoints will be {'set to NA' if is_na else 'ignored'}. Please check the report for details {report_path}"
         )
-        logging.warning(f"{len(datapoint_list)} {data_type} datapoints to be ignored: ")
-        for i, error in enumerate(datapoint_list, start=1):
-            logging.warning(f"{i} DataElement {'NA' if is_na else ''} ignored: {error}")
+        logging.warning(
+            f"{len(datapoint_list)} {data_type} datapoints {'will be set to NA' if is_na else 'to be ignored'}: "
+        )
+        for i, dp in enumerate(datapoint_list, start=1):
+            logging.warning(f"{i} DataElement {'NA' if is_na else 'ignored'} : {dp}")
 
 
 def apply_source_mappings_for_dse_data(dataset_df: pd.DataFrame, mappings: dict, dataset: str) -> pd.DataFrame:
