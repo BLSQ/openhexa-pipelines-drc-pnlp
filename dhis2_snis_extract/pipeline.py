@@ -222,17 +222,18 @@ def extract_snis_data(pipeline_path: str, config: dict, dhis2_snis_client: DHIS2
 
     # NOTE: We add this function to the class to remind me to update the library!
     # dhis2_snis_client.data_value_sets.snis_get = MethodType(snis_get, dhis2_snis_client.data_value_sets)
-
     try:
-        # Set start and end periods ---> with a window of a year we are safe 12 months DEFAULT
-        # NOTE: add in config config["EXTRACT_SETTINGS"]["LAG"] = 12
+        # Set start and end periods ---> with a window of 6 months we are safe: 6 months DEFAULT
+        months_lag = config["EXTRACT_SETTINGS"].get("NUMBER_MONTHS_WINDOW", 6)  # default 6 months window
+
+        # STARTDATE overwrites month window
         if config["EXTRACT_SETTINGS"]["STARTDATE"] == "":
-            start = (datetime.now() - relativedelta(months=12)).strftime("%Y%m")
+            start = (datetime.now() - relativedelta(months=months_lag)).strftime("%Y%m")
         else:
             start = config["EXTRACT_SETTINGS"]["STARTDATE"]
 
         if config["EXTRACT_SETTINGS"]["ENDDATE"] == "":
-            end = datetime.now().strftime("%Y%m")
+            end = (datetime.now() - relativedelta(months=1)).strftime("%Y%m")  # go back 1 month.
         else:
             end = config["EXTRACT_SETTINGS"]["ENDDATE"]
 
@@ -241,7 +242,7 @@ def extract_snis_data(pipeline_path: str, config: dict, dhis2_snis_client: DHIS2
 
         # retrieve FOSA ids from SNIS
         fosa_list = retrieve_ou_list(dhis2_client=dhis2_snis_client, ou_level=5)
-        current_run.log_info(f"Download MODE: {config['EXTRACT_SETTINGS']['MODE']}")
+        current_run.log_info(f"Download MODE: {config['EXTRACT_SETTINGS']['MODE']} from: {start} to {end}")
 
         # retrieve data
         for period in extract_periods:
