@@ -5,14 +5,9 @@ from datetime import datetime
 import requests
 import logging
 
+
 from utils import (
-    # get_periods_yyyymm,
-    # merge_dataframes,
-    # initialize_queue,
-    enqueue,
-    dequeue,
-    # save_to_parquet,
-    # first_day_of_future_month,
+    Queue,
     read_parquet_extract,
     split_list,
 )
@@ -330,7 +325,6 @@ def push_extracts(
     config: dict,
     run_task: bool,
     wait: bool,
-    enqueue_failed: bool = True,
 ):
     """Put some data processing code here."""
 
@@ -341,7 +335,6 @@ def push_extracts(
     report_path = os.path.join(root, "logs", "extracts")
     configure_login(logs_path=report_path, task_name="extracts")
     db_path = os.path.join(extract_pipeline_path, "config", ".queue.db")
-    period_skipped = []
 
     # Parameters for the import
     import_strategy = config["PUSH_SETTINGS"].get("IMPORT_STRATEGY", None)
@@ -362,6 +355,9 @@ def push_extracts(
         f"Pushing data elemetns with parameters import_strategy: {import_strategy}, dry_run: {dry_run}, max_post: {max_post}"
     )
 
+    # initialize push queue
+    push_queue = Queue(db_path)
+
     try:
         dataelement_mappings = config.get("DATAELEMENT_MAPPING", None)
         if dataelement_mappings is None:
@@ -377,7 +373,7 @@ def push_extracts(
             raise ValueError
 
         while True:
-            next_period = dequeue(db_path)
+            next_period = push_queue.peek()  # I dont remove yet, just take a look at the next period
             if not next_period:
                 break
 
@@ -389,7 +385,6 @@ def push_extracts(
                 )
                 current_run.log_info(f"Push extract period: {next_period}.")
             except Exception as e:
-                period_skipped.append(next_period)
                 current_run.log_warning(
                     f"Error while reading the extracts file: snis_data_{next_period}.parquet - error: {e}"
                 )
@@ -459,6 +454,9 @@ def push_extracts(
                 max_post=max_post,
             )
 
+            # The process is correct, so we remove the period from the queue
+            _ = push_queue.dequeue()
+
             # log info
             msg = f"Analytics extracts summary for period {next_period}: {summary['import_counts']}"
             current_run.log_info(msg)
@@ -466,12 +464,6 @@ def push_extracts(
             log_summary_errors(summary)
 
         current_run.log_info("No more extracts to push.")
-
-        # Enqueue the fail periods to re-try in the next run?
-        # Sure, if the period exists in the queue, it will not be added again.
-        if enqueue_failed:
-            for p in period_skipped:
-                enqueue(p, db_path)
 
     except Exception as e:
         raise Exception(f"Analytic extracts task error: {e}")
@@ -850,7 +842,7 @@ def push_data_elements(
             error_response = get_response_value_errors(response, chunk=chunk)
             summary["ERRORS"].append({"error": e, "response": error_response})
 
-        if (count * max_post) % 20000 == 0:
+        if (count * max_post) % 100000 == 0:
             current_run.log_info(
                 f"{count * max_post} / {total_datapoints} data points pushed summary: {summary['import_counts']}"
             )

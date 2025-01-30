@@ -11,10 +11,9 @@ from itertools import product
 from utils import (
     get_periods_yyyymm,
     merge_dataframes,
-    initialize_queue,
-    enqueue,
     save_to_parquet,
     first_day_of_future_month,
+    Queue,
 )
 
 from openhexa.sdk import current_run, pipeline, workspace, parameter
@@ -311,10 +310,10 @@ def handle_extract_for_period(dhis2_client: DHIS2, period: str, org_unit_list: l
 
     # fname period extract (We can use the config["DHIS2_CONNECTION"] as reference in the file)
     extract_fname = os.path.join(root, "data", "raw", "extracts", f"snis_data_{period}.parquet")
+    queue_db_path = os.path.join(root, "config", ".queue.db")
 
     # initialize update queue
-    queue_db_path = os.path.join(root, "config", ".queue.db")
-    initialize_queue(queue_db_path)
+    push_queue = Queue(queue_db_path)
 
     # limits
     dhis2_client.analytics.MAX_DX = 10
@@ -341,7 +340,7 @@ def handle_extract_for_period(dhis2_client: DHIS2, period: str, org_unit_list: l
             if os.path.exists(extract_fname):
                 current_run.log_info(f"Replacing extract for period {period}.")
             save_to_parquet(raw_data, extract_fname)
-            enqueue(period, queue_db_path)
+            push_queue.enqueue(period)
         else:
             current_run.log_info(f"Nothing to save for period {period}..")
 
@@ -362,7 +361,7 @@ def handle_extract_for_period(dhis2_client: DHIS2, period: str, org_unit_list: l
             raw_data = merge_dataframes([raw_routine_data, raw_rates_data, raw_acm_data])
             if raw_data is not None:
                 save_to_parquet(raw_data, extract_fname)
-                enqueue(period, queue_db_path)
+                push_queue.enqueue(period)
             else:
                 current_run.log_info(f"Nothing to save for period {period}..")
 
@@ -393,7 +392,7 @@ def handle_extract_for_period(dhis2_client: DHIS2, period: str, org_unit_list: l
                     target_df=pd.read_parquet(extract_fname),
                 )
                 save_to_parquet(raw_data_updated, extract_fname)
-                enqueue(period, queue_db_path)
+                push_queue.enqueue(period)
 
         else:
             raw_routine_data = retrieve_snis_routine_extract(
@@ -410,7 +409,7 @@ def handle_extract_for_period(dhis2_client: DHIS2, period: str, org_unit_list: l
         # save
         if raw_data is not None:
             save_to_parquet(raw_data, extract_fname)
-            enqueue(period, queue_db_path)
+            push_queue.enqueue(period)
         else:
             current_run.log_info(f"Nothing to save for period {period}..")
     else:

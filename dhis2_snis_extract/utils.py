@@ -63,70 +63,6 @@ def merge_dataframes(dataframes: list[pd.DataFrame]) -> pd.DataFrame:
     return pd.concat(not_none_df) if not_none_df else None
 
 
-def initialize_queue(db_path: str):
-    """
-    Initialize the items as TEXT
-    #"""
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    cursor.execute("""
-                CREATE TABLE IF NOT EXISTS queue (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    period TEXT NOT NULL
-                )
-            """)
-    conn.commit()
-
-
-def enqueue(period: str, db_path: str):
-    """
-    Add a new period to the queue only if it does not already exist.
-    """
-    with sqlite3.connect(db_path) as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM queue WHERE period = ?", (period,))
-        exists = cursor.fetchone()[0]
-
-        if not exists:  # Insert only if the period does not exist
-            cursor.execute("INSERT INTO queue (period) VALUES (?)", (period,))
-            conn.commit()
-
-
-def dequeue(db_path: str):
-    with sqlite3.connect(db_path) as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT id, period FROM queue ORDER BY id LIMIT 1")
-        item = cursor.fetchone()
-        if item:
-            cursor.execute("DELETE FROM queue WHERE id = ?", (item[0],))
-            conn.commit()
-            return item[1]
-        return None
-
-
-def reset_queue(db_path: str):
-    """
-    Clear all contents from the queue.
-    """
-    with sqlite3.connect(db_path) as conn:
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM queue;")
-        conn.commit()
-        cursor.execute("VACUUM")
-        conn.commit()
-
-
-def count_queue_items(db_path: str) -> int:
-    """
-    Count the number of items in the queue.
-    """
-    with sqlite3.connect(db_path) as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM queue")
-        count = cursor.fetchone()[0]
-    return count
-
-
 def first_day_of_future_month(date: str, months_to_add: int) -> str:
     """
     Compute the first day of the month after adding a given number of months.
@@ -213,3 +149,108 @@ def split_list(src_list: list, length: int) -> List[list]:
     """Split list into chunks."""
     for i in range(0, len(src_list), length):
         yield src_list[i : i + length]
+
+
+# my queue class
+class Queue:
+    def __init__(self, db_path: str):
+        """
+        Initialize the queue with the given SQLite database path.
+        """
+        self.db_path = db_path
+        self._initialize_queue()
+
+    def _initialize_queue(self):
+        """
+        Create the queue table if it does not exist.
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS queue (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    period TEXT NOT NULL
+                )
+            """)
+            conn.commit()
+
+    def enqueue(self, period: str):
+        """
+        Add a new period to the queue only if it does not already exist.
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM queue WHERE period = ?", (period,))
+            exists = cursor.fetchone()[0]
+
+            if not exists:  # Insert only if the period does not exist
+                cursor.execute("INSERT INTO queue (period) VALUES (?)", (period,))
+                conn.commit()
+
+    def dequeue(self):
+        """
+        Remove and return the first period in the queue.
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, period FROM queue ORDER BY id LIMIT 1")
+            item = cursor.fetchone()
+            if item:
+                cursor.execute("DELETE FROM queue WHERE id = ?", (item[0],))
+                conn.commit()
+                return item[1]
+        return None
+
+    def peek(self):
+        """
+        Return the first period in the queue without removing it.
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT period FROM queue ORDER BY id LIMIT 1")
+            item = cursor.fetchone()
+            return item[0] if item else None
+
+    def count(self) -> int:
+        """
+        Return the number of items in the queue.
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM queue")
+            return cursor.fetchone()[0]
+
+    def reset(self):
+        """
+        Clear all contents from the queue and reset the indexing.
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("DROP TABLE IF EXISTS queue;")  # Drop table to reset indexing
+            conn.commit()
+            self._initialize_queue()  # Recreate table
+
+    def view_queue(self):
+        """
+        View all elements in the queue without removing them.
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, period FROM queue ORDER BY id")
+            items = cursor.fetchall()
+            if items:
+                print("Queue contents:")
+                for item in items:
+                    print(f"ID: {item[0]}, Period: {item[1]}")
+            else:
+                print("The queue is empty.")
+
+    def count_queue_items(self) -> int:
+        """
+        Count the number of items in the queue.
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM queue")
+            count = cursor.fetchone()[0]
+        return count
