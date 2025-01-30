@@ -313,7 +313,9 @@ def precipitation_push(pipeline_path: str, dhis2_client_target: DHIS2, config: d
             )
         else:
             # Save the last date pushed for Temperature min
-            current_run.log_info(f"All {len(datapoints_valid)} datapoints correctly imported.")
+            total_dp = summary["import_counts"]["imported"] + summary["import_counts"]["updated"]
+            current_run.log_info(f"{total_dp} datapoints correctly processed.")
+            # current_run.log_info(f"All {len(datapoints_valid)} datapoints correctly imported.")
             # Save the last date pushed for precipitation
             update_last_available_date_log(os.path.join(pipeline_path, "config"), "precipitation", precip_date_max)
 
@@ -443,7 +445,9 @@ def tempareture_min_push(pipeline_path: str, dhis2_client_target: DHIS2, config:
             )
         else:
             # Save the last date pushed for Temperature min
-            current_run.log_info(f"All {len(datapoints_valid)} datapoints correctly imported.")
+            total_dp = summary["import_counts"]["imported"] + summary["import_counts"]["updated"]
+            current_run.log_info(f"{total_dp} datapoints correctly processed.")
+            # current_run.log_info(f"All {len(datapoints_valid)} datapoints correctly imported.")
             # Save the last date pushed for Temperature min
             update_last_available_date_log(os.path.join(pipeline_path, "config"), "temperature_min", temp_min_date_max)
 
@@ -777,7 +781,9 @@ def tempareture_max_push(pipeline_path: str, dhis2_client_target: DHIS2, config:
             )
         else:
             # Save the last date pushed for Temperature max
-            current_run.log_info(f"All {len(datapoints_valid)} datapoints correctly imported.")
+            total_dp = summary["import_counts"]["imported"] + summary["import_counts"]["updated"]
+            current_run.log_info(f"{total_dp} datapoints correctly processed.")
+            # current_run.log_info(f"All {len(datapoints_valid)} datapoints correctly imported.")
             update_last_available_date_log(os.path.join(pipeline_path, "config"), "temperature_max", temp_max_date_max)
 
         return True
