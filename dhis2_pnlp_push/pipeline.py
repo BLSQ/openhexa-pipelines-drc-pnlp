@@ -445,6 +445,7 @@ def push_extracts(
                 logging.info(msg)
                 log_summary_errors(summary_na)
 
+            current_run.log_info(f"Pushing {len(datapoints_valid)} valid data elements for period {next_period}.")
             # push data
             summary = push_data_elements(
                 dhis2_client=dhis2_client_target,

@@ -345,6 +345,7 @@ def pnlp_dse_database_push(pipeline_path: str, dhis2_client_target: DHIS2, confi
             log_summary_errors(summary_na)
         #
 
+        current_run.log_info(f"Start pushing {len(datapoints_valid)} valid data values.")
         # Push valid data
         summary = push_data_elements(
             dhis2_client=dhis2_client_target,
@@ -495,6 +496,7 @@ def pnlp_completude_push(pipeline_path: str, dhis2_client_target: DHIS2, config:
             log_summary_errors(summary_na)
         #
 
+        current_run.log_info(f"Start pushing {len(datapoints_valid)} valid data values.")
         # push valid datapoints
         summary = push_data_elements(
             dhis2_client=dhis2_client_target,
