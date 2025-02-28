@@ -49,7 +49,7 @@ def sentinel_update_extract(get_year, update_pnlp):
     }
 
     # execute OU sentinel uid list (NOTE: see sentinel-sites/sentinel_org_units_groups.ipynb)
-    sucess = run_sentinel_oug_update(parameters=parameters)
+    succes = run_sentinel_oug_update(parameters=parameters)
 
     # Run update notebook for PNLP tables
     run_update_with(
@@ -57,7 +57,7 @@ def sentinel_update_extract(get_year, update_pnlp):
         nb_path=notebook_path,
         out_nb_path=out_notebook_path,
         parameters=parameters,
-        sucess=sucess,
+        succes=succes,
     )
 
 
@@ -96,14 +96,14 @@ def run_sentinel_oug_update(parameters: dict):
     execution_timestamp = datetime.utcnow().strftime("%Y-%m-%d_%H_%M_%S")
     try:
         pm.execute_notebook(
-            input_path=f"{workspace.files_path}/sentinel-sites/sentinel_org_units_groups_OUTPUT_{execution_timestamp}.ipynb",
-            output_path=f"{workspace.files_path}/sentinel-sites/papermill_outputs",
+            input_path=f"{workspace.files_path}/sentinel-sites/code/sentinel_org_units_groups.ipynb",
+            output_path=f"{workspace.files_path}/sentinel-sites/papermill_outputs/sentinel_org_units_groups_OUTPUT_{execution_timestamp}.ipynb",
             parameters=parameters,
         )
     except Exception as e:
         current_run.log_info(f"Sentinel OU groups update error {type(e)}: e")
 
-    current_run.log_info("Sentinel organisation unit groups file updated.")
+    # current_run.log_info(f"Sentinel organisation unit groups file updated for year {parameters['ANNEE_A_ANALYSER']}.")
 
     return True
 
