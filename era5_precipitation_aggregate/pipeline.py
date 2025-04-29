@@ -23,6 +23,8 @@ from openhexa.toolbox.era5.aggregate import (
 )
 from openhexa.toolbox.era5.cds import VARIABLES
 
+local = False
+
 
 @pipeline("__pipeline_id__", name="ERA5_precipitation_aggregate")
 @parameter(
@@ -58,17 +60,29 @@ def era5_aggregate(
     # load boundaries
     boundaries = load_boundaries(db_table="cod_iaso_zone_de_sante")
 
-    df_weekly = aggregate_ERA5_data(
+    df_daily = aggregate_ERA5_data_daily(
         input_dir=input_dir,
         boundaries=boundaries,
         output_dir=output_dir,
     )
 
+    df_weekly = weekly(
+        df=df_daily,
+        dst_file=Path(output_dir).joinpath("total_precipitation_weekly.parquet").as_posix(),
+    )
+
+    df_monthly = monthly(
+        df=df_daily,
+        dst_file=Path(output_dir).joinpath("total_precipitation_monthly.parquet").as_posix(),
+    )
+
     # upload to table
     upload_data_to_table(df=df_weekly, targetTable="cod_precipitation_weekly_auto")
+    upload_data_to_table(df=df_monthly, targetTable="cod_precipitation_monthly_auto")
 
-    # update dataset
-    update_precipitation_dataset(df=df_weekly)
+    # update dataset -- we only do this for the weekly data.
+    if not local:
+        update_precipitation_dataset(df=df_weekly)
 
     current_run.log_info("Precipitation data table updated")
 
@@ -77,13 +91,17 @@ def era5_aggregate(
 def load_boundaries(db_table: dict) -> gpd.GeoDataFrame:
     """Load boundaries from database."""
     current_run.log_info(f"Loading boundaries from {db_table}")
-    dbengine = create_engine(os.environ["WORKSPACE_DATABASE_URL"])
+    if local:
+        postgres_connection = workspace.postgresql_connection(db_table)
+        dbengine = create_engine(postgres_connection.url)
+    else:
+        dbengine = create_engine(os.environ["WORKSPACE_DATABASE_URL"])
     boundaries = gpd.read_postgis(db_table, con=dbengine, geom_col="geometry")
     return boundaries
 
 
 @era5_aggregate.task
-def aggregate_ERA5_data(
+def aggregate_ERA5_data_daily(
     input_dir: Path,
     boundaries: gpd.GeoDataFrame,
     output_dir: Path,
@@ -101,23 +119,21 @@ def aggregate_ERA5_data(
         boundaries=boundaries,
     )
 
-    # weekly aggregation
-    df_weekly = weekly(
-        df=df_daily,
-        dst_file=Path(output_dir).joinpath(f"{variable}_weekly.parquet").as_posix(),
-    )
-
-    return df_weekly
+    return df_daily
 
 
 @era5_aggregate.task
 def upload_data_to_table(df: pd.DataFrame, targetTable: str):
-    """Upload the processed weekly data temperature stats to target table."""
+    """Upload the processed precipitation data stats to target table."""
 
-    current_run.log_info(f"Updating weekly table : {targetTable}")
+    current_run.log_info(f"Updating table : {targetTable}")
 
     # Create engine
-    dbengine = create_engine(os.environ["WORKSPACE_DATABASE_URL"])
+    if local:
+        postgres_connection = workspace.postgresql_connection(targetTable)
+        dbengine = create_engine(postgres_connection.url)
+    else:
+        dbengine = create_engine(os.environ["WORKSPACE_DATABASE_URL"])
 
     # Create table
     df.to_sql(targetTable, dbengine, index=False, if_exists="replace", chunksize=4096)
@@ -356,8 +372,9 @@ def filesystem(target_path: str, cache_dir: str = None) -> fsspec.AbstractFileSy
         return fsspec.filesystem(protocol=target_protocol, client_kwargs=client_kwargs)
 
 
+@era5_aggregate.task
 def weekly(df: pd.DataFrame, dst_file: str) -> pd.DataFrame:
-    """Get weekly temperature from daily dataset."""
+    """Get weekly precipation from daily dataset."""
     df_weekly = get_weekly_aggregates(df)
     current_run.log_info(f"Applied weekly aggregation ({len(df_weekly)} measurements)")
     fs = filesystem(dst_file)
@@ -366,6 +383,19 @@ def weekly(df: pd.DataFrame, dst_file: str) -> pd.DataFrame:
         fs.put(tmp.name, dst_file)
     current_run.add_file_output(dst_file)
     return df_weekly
+
+
+@era5_aggregate.task
+def monthly(df: pd.DataFrame, dst_file: str) -> pd.DataFrame:
+    """Get monthly precipation from daily dataset."""
+    df_monthly = get_monthly_aggregates(df)
+    current_run.log_info(f"Applied montly aggregation ({len(df_monthly)} measurements)")
+    fs = filesystem(dst_file)
+    with tempfile.NamedTemporaryFile(suffix=".parquet") as tmp:
+        df_monthly.to_parquet(tmp.name)
+        fs.put(tmp.name, dst_file)
+    current_run.add_file_output(dst_file)
+    return df_monthly
 
 
 def get_weekly_aggregates(df: pd.DataFrame) -> pd.DataFrame:
@@ -431,5 +461,68 @@ def get_weekly_aggregates(df: pd.DataFrame) -> pd.DataFrame:
     return merged_df
 
 
+def get_monthly_aggregates(df: pd.DataFrame) -> pd.DataFrame:
+    """Apply montly aggregation of input daily dataframe.
+
+    Parameters
+    ----------
+    df : dataframe
+        Input dataframe
+
+    Return
+    ------
+    dataframe
+        Monthly dataframe of length (n_features * n_months)
+    """
+    df_ = df.copy()
+    df_["period"] = pd.to_datetime(df_["period"])
+    df_["year"] = df_["period"].dt.year
+    df_["month"] = df_["period"].dt.month
+
+    # Start and end dates
+    df_["start_date"] = df_["period"].values.astype("datetime64[M]")
+    df_["end_date"] = df_["start_date"] + pd.offsets.MonthEnd(0)
+    df_["mid_date"] = df_["start_date"] + pd.Timedelta(days=14)
+
+    # monthly aggregation sum
+    sums = df_.groupby(by=["ref", "year", "month"])[["sum"]].sum().reset_index()
+    data_left = df_.copy()
+    data_left["period"] = pd.to_datetime(data_left["period"]).dt.strftime("%Y-%m")
+    data_left = data_left.drop(columns=["sum"])
+    data_left = data_left.drop_duplicates(subset=data_left.columns)  # unique rows
+
+    # merge
+    merged_df = pd.merge(data_left, sums, on=["ref", "year", "month"], how="left")
+
+    # fix format
+    merged_df = merged_df[
+        [
+            "name_short",
+            "ref",
+            "parent_short",
+            "parent_ref",
+            "group_refs",
+            "group_names",
+            "uuid",
+            "name",
+            "parent",
+            "period",
+            "count",
+            "year",
+            "month",
+            "start_date",
+            "end_date",
+            "mid_date",
+            "sum",
+        ]
+    ]
+
+    return merged_df
+
+
 def _compute_mid_date(epiweek: EpiWeek) -> datetime:
     return epiweek.start + (epiweek.end - epiweek.start) / 2
+
+
+if __name__ == "__main__":
+    era5_aggregate()
