@@ -4,7 +4,7 @@ from pathlib import Path
 
 # from unidecode import unidecode
 from rapidfuzz import fuzz, process
-from openhexa.sdk import pipeline, current_run, workspace
+from openhexa.sdk import pipeline, current_run  # workspace
 
 
 @pipeline("dhis2-ewars-push", name="dhis2_ewars_push")
@@ -21,7 +21,7 @@ def dhis2_ewars_push():
     dhis2_pyramid = pd.read_parquet(local_wd / "dhis2_ewars_push" / "data" / "raw" / "dhis2_pyramid.parquet")
     ## SETUP ##
 
-    # workspace.files_path
+    # workspace.files_path # use this to refer to the workspace environment
 
     # TASKS
     # --------------------------------------------------------
