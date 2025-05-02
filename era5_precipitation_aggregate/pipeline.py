@@ -23,8 +23,6 @@ from openhexa.toolbox.era5.aggregate import (
 )
 from openhexa.toolbox.era5.cds import VARIABLES
 
-local = False
-
 
 @pipeline("__pipeline_id__", name="ERA5_precipitation_aggregate")
 @parameter(
@@ -78,11 +76,10 @@ def era5_aggregate(
 
     # upload to table
     upload_data_to_table(df=df_weekly, targetTable="cod_precipitation_weekly_auto")
-    upload_data_to_table(df=df_monthly, targetTable="cod_precipitation_monthly_auto")
+    # upload_data_to_table(df=df_monthly, targetTable="cod_precipitation_monthly_auto")
 
     # update dataset -- we only do this for the weekly data.
-    if not local:
-        update_precipitation_dataset(df=df_weekly)
+    update_precipitation_dataset(df=df_weekly)
 
     current_run.log_info("Precipitation data table updated")
 
@@ -91,11 +88,7 @@ def era5_aggregate(
 def load_boundaries(db_table: dict) -> gpd.GeoDataFrame:
     """Load boundaries from database."""
     current_run.log_info(f"Loading boundaries from {db_table}")
-    if local:
-        postgres_connection = workspace.postgresql_connection(db_table)
-        dbengine = create_engine(postgres_connection.url)
-    else:
-        dbengine = create_engine(os.environ["WORKSPACE_DATABASE_URL"])
+    dbengine = create_engine(os.environ["WORKSPACE_DATABASE_URL"])
     boundaries = gpd.read_postgis(db_table, con=dbengine, geom_col="geometry")
     return boundaries
 
@@ -129,11 +122,7 @@ def upload_data_to_table(df: pd.DataFrame, targetTable: str):
     current_run.log_info(f"Updating table : {targetTable}")
 
     # Create engine
-    if local:
-        postgres_connection = workspace.postgresql_connection(targetTable)
-        dbengine = create_engine(postgres_connection.url)
-    else:
-        dbengine = create_engine(os.environ["WORKSPACE_DATABASE_URL"])
+    dbengine = create_engine(os.environ["WORKSPACE_DATABASE_URL"])
 
     # Create table
     df.to_sql(targetTable, dbengine, index=False, if_exists="replace", chunksize=4096)
