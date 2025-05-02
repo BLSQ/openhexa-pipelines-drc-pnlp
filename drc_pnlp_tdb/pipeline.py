@@ -26,7 +26,7 @@ from openhexa.toolbox.dhis2 import DHIS2
     name="Year",
     help="Year for which to extract and process data",
     type=int,
-    default=2024,
+    default=2025,
     required=False,
 )
 @parameter(
@@ -53,9 +53,7 @@ from openhexa.toolbox.dhis2 import DHIS2
     default=True,
     required=False,
 )
-def pnlp_extract_process(
-    get_year, get_download, get_run_notebooks, get_upload, *args, **kwargs
-):
+def pnlp_extract_process(get_year, get_download, get_run_notebooks, get_upload, *args, **kwargs):
     """ """
 
     # setup variables
@@ -101,6 +99,9 @@ def pnlp_extract_process(
 def extract_dhis_data(output_dir, year, mode, *args, **kwargs):
     is_routine = mode == "routine"
 
+    # if is_routine:
+    #     extract_periods = [["202410", "202411", "202412"]]
+    # else:
     extract_periods = get_dhis_month_period(year, routine=is_routine)
 
     for period in extract_periods:
@@ -133,9 +134,7 @@ def dhis2_download_analytics(output_dir, extract_period, mode, *args, **kwargs):
 
     # establish DHIS2 connection
     connection = workspace.dhis2_connection("drc-snis")
-    dhis2 = DHIS2(
-        connection=connection, cache_dir=None
-    )  # f'{workspace.files_path}/temp/')
+    dhis2 = DHIS2(connection=connection, cache_dir=None)  # f'{workspace.files_path}/temp/')
 
     ous = pd.DataFrame(dhis2.meta.organisation_units())
     fosa_list = ous.loc[ous.level == 5].id.to_list()
@@ -148,9 +147,7 @@ def dhis2_download_analytics(output_dir, extract_period, mode, *args, **kwargs):
         routine = True
 
         # data elements for extract ex: ["aZwnLALknnj", "D3h3Qvl0332"]
-        DATA_DIR = (
-            f"{workspace.files_path}/pnlp-tdb-pipeline/data/"  # Todo: make global
-        )
+        DATA_DIR = f"{workspace.files_path}/pnlp-tdb-pipeline/data/"  # Todo: make global
         metadata_file_path = f"{DATA_DIR}metadata/data_elements_for_routine_extract.csv"
         monitored_des = pd.read_csv(metadata_file_path).dx_uid.to_list()
 
@@ -169,9 +166,7 @@ def dhis2_download_analytics(output_dir, extract_period, mode, *args, **kwargs):
 
         reporting_datasets = ["pMbC0FJPkcm", "maDtHIFrSHx", "OeWrFwkFMvf"]
         output_directory_name = "reporting-rates"
-        reporting_des = [
-            f"{ds}.{metric}" for ds, metric in product(reporting_datasets, METRICS)
-        ]
+        reporting_des = [f"{ds}.{metric}" for ds, metric in product(reporting_datasets, METRICS)]
 
     else:
         acm_indicator_id = ["fvlFcxuGRng"]
@@ -184,9 +179,10 @@ def dhis2_download_analytics(output_dir, extract_period, mode, *args, **kwargs):
     dhis2.analytics.MAX_OU = 10
 
     if mode == "routine":
-        raw_data = dhis2.analytics.get(
-            data_elements=monitored_des, periods=extract_period, org_units=fosa_list
-        )
+        raw_data = dhis2.analytics.get(data_elements=monitored_des, periods=extract_period, org_units=fosa_list)
+        # raw_data = dhis2.analytics.get(
+        #     data_elements=monitored_des[0:10], periods=extract_period, org_units=["pCfpKXoGBF8"]
+        # )#TEST
     elif mode == "reporting-rates":
         raw_data = dhis2.analytics.get(
             data_elements=reporting_des,
@@ -206,7 +202,7 @@ def dhis2_download_analytics(output_dir, extract_period, mode, *args, **kwargs):
 
     # extract metadata
     current_run.log_info("Extracting + merging instance metadata")
-    df = dhis2.meta.add_org_unit_name_column(dataframe=df)
+    df = dhis2.meta.add_org_unit_name_column(dataframe=df, org_unit_id_column="ou")
     # df = dhis2.meta.add_org_unit_parent_columns(dataframe=df) # ERROR
     df = add_org_unit_parent_columns_TEMP(df, ous, dhis2)
 
@@ -255,7 +251,6 @@ def get_dhis_month_period(year, routine=False):
     """
 
     current_date = date.today()
-
     # "Hacky solution" to run the pipeline for a specific period
     # current_date = datetime.strptime('2024-04-01', '%Y-%m-%d').date() # Run for quarter Q1
     # current_date = datetime.strptime('2024-07-01', '%Y-%m-%d').date() # Run for quarter Q2
@@ -275,9 +270,7 @@ def get_dhis_month_period(year, routine=False):
     else:
         if routine:
             month_quarter_pairs = [(1, 3), (4, 6), (7, 9), (10, 12)]
-            return list(
-                map(lambda x: dhis_period_range(year, x[0], x[1]), month_quarter_pairs)
-            )
+            return list(map(lambda x: dhis_period_range(year, x[0], x[1]), month_quarter_pairs))
 
     month_list = dhis_period_range(year, period_start_month, period_end_month)
 
@@ -328,9 +321,7 @@ def add_org_unit_parent_columns_TEMP(df, org_units, dhis2):
     # Create columns for parent levels
     columns = []
     for lvl in range(1, len(levels)):
-        columns.append(
-            pl.col("path").str.split("/").list.get(lvl).alias(f"parent_level_{lvl}_id")
-        )
+        columns.append(pl.col("path").str.split("/").list.get(lvl).alias(f"parent_level_{lvl}_id"))
 
     org_units_parent = org_units_polar.with_columns(columns)
 
@@ -349,11 +340,7 @@ def add_org_unit_parent_columns_TEMP(df, org_units, dhis2):
         )
 
     # Select only relevant columns from org_units_parent
-    selected_columns = ["id"] + [
-        f"parent_level_{lvl}_{col}"
-        for lvl in range(1, len(levels))
-        for col in ["id", "name"]
-    ]
+    selected_columns = ["id"] + [f"parent_level_{lvl}_{col}" for lvl in range(1, len(levels)) for col in ["id", "name"]]
     selected_polars_df = org_units_parent.select(selected_columns)
 
     # Convert to pandas DataFrame
