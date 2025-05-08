@@ -33,14 +33,14 @@ warnings.simplefilter(action="ignore", category=FutureWarning)
     type=str,
     name="Input directory",
     help="Input directory with raw ERA5 extracts",
-    default="data/era5/raw",
+    default="data/era5/full_raw",
 )
 @parameter(
     "output_dir",
     type=str,
     name="Output directory",
     help="Output directory for the aggregated data",
-    default="data/era5/aggregate",
+    default="data/era5/full_aggregate",
 )
 def era5_aggregate(
     input_dir: str,
@@ -74,6 +74,7 @@ def calculate_aggregations(boundaries, input_dir, output_dir):
     list_weekly = []
     list_monthly = []
     full_input_dir = input_dir / "2m_temperature"
+    dict_weekly = {}
 
     # Calculate the aggregations for the necessary funcions.
     for agg_func in ["min", "max"]:  # We want both the maximum and minimum temperature.
@@ -86,6 +87,7 @@ def calculate_aggregations(boundaries, input_dir, output_dir):
             agg_func=agg_func,
         )
         list_weekly.append(df_weekly_part)
+        dict_weekly[agg_func] = df_weekly_part
 
         df_monthly_part = get_monthly_aggregates(
             df=df_daily_part,
@@ -110,11 +112,14 @@ def calculate_aggregations(boundaries, input_dir, output_dir):
     save_df(df_monthly_full, path_monthly)
 
     # upload to table
-    upload_data_to_table(df=df_weekly_full, targetTable="cod_temperature_weekly_auto")
+    names_of_tables = {"min": "cod_temperature_tmin_weekly_test", "max": "cod_temperature_tmax_weekly_test"}
+    for agg_func, target_table in names_of_tables.items():
+        df_weekly = dict_weekly[agg_func]
+        upload_data_to_table(df=df_weekly, targetTable=target_table)
 
     # update dataset -- we only do this for the weekly data
     if not local:
-        update_temperature_dataset(df=df_weekly_full)
+        update_temperature_dataset(dict=dict_weekly)
 
     current_run.log_info("Temperature data table updated")
 
@@ -183,7 +188,7 @@ def upload_data_to_table(df: pd.DataFrame, targetTable: str):
     del dbengine
 
 
-def update_temperature_dataset(df: pd.DataFrame):
+def update_temperature_dataset(dict: dict):
     """Update the temperature dataset to be shared."""
 
     current_run.log_info("Updating temperature dataset")
@@ -191,22 +196,23 @@ def update_temperature_dataset(df: pd.DataFrame):
     # Get the dataset
     dataset = workspace.get_dataset("climate-dataset-tempera-39e1f8")
     date_version = f"ds_{datetime.now().strftime('%Y_%m_%d_%H%M')}"
+    added_new = False
 
-    try:
-        # Create new DS version
-        version = dataset.create_version(date_version)
-    except Exception as e:
-        current_run.log_error(f"The dataset version already exists - ERROR: {e}")
-        raise
-
-    try:
-        # Add temperature .parquet to DS
-        with tempfile.NamedTemporaryFile(suffix=".parquet") as tmp:
-            df.to_parquet(tmp.name)
-            version.add_file(tmp.name, filename=f"Temperature_{date_version}.parquet")
-    except Exception as e:
-        current_run.log_error(f"Dataset file cannot be saved - ERROR: {e}")
-        raise
+    for agg_func, df in dict.items():
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".parquet") as tmp:
+                # If we have not created the new version yet, we create it.
+                if not added_new:
+                    version = dataset.create_version(date_version)
+                    current_run.log_info(f"New dataset version {date_version} created")
+                    added_new = True
+                # Add temperature .parquet to DS
+                df.to_parquet(tmp.name)
+                file_name = f"Temperature_t{agg_func}_{date_version}.parquet"
+                version.add_file(tmp.name, filename=file_name)
+        except Exception as e:
+            current_run.log_error(f"Dataset file cannot be saved - ERROR: {e}")
+            raise
 
     current_run.log_info(f"New dataset version {date_version} created")
 
