@@ -5,6 +5,7 @@ from io import BytesIO
 from pathlib import Path
 from shutil import copyfile
 from datetime import datetime
+import warnings
 
 import geopandas as gpd
 import polars as pl
@@ -19,12 +20,14 @@ import fsspec
 from openhexa.toolbox.era5.aggregate import (
     build_masks,
     get_transform,
-    merge,
 )
 from openhexa.toolbox.era5.cds import VARIABLES
 
+local = True
+warnings.simplefilter(action="ignore", category=FutureWarning)
 
-@pipeline("__pipeline_id__", name="ERA5_precipitation_aggregate")
+
+@pipeline("__pipeline_id__", name="ERA5_temperature_aggregate")
 @parameter(
     "input_dir",
     type=str,
@@ -58,71 +61,121 @@ def era5_aggregate(
     # load boundaries
     boundaries = load_boundaries(db_table="cod_iaso_zone_de_sante")
 
-    df_daily = aggregate_ERA5_data_daily(
-        input_dir=input_dir,
-        boundaries=boundaries,
-        output_dir=output_dir,
-    )
+    calculate_aggregations(boundaries, input_dir, output_dir)
 
-    df_weekly = weekly(
-        df=df_daily,
-        dst_file=Path(output_dir).joinpath("total_precipitation_weekly.parquet").as_posix(),
-    )
 
-    df_monthly = monthly(
-        df=df_daily,
-        dst_file=Path(output_dir).joinpath("total_precipitation_monthly.parquet").as_posix(),
-    )
+@era5_aggregate.task
+def calculate_aggregations(boundaries, input_dir, output_dir):
+    """
+    Calculate the daily, weekly and montly temperature aggregations.
+    """
+    # Initialize the variables
+    list_daily = []
+    list_weekly = []
+    list_monthly = []
+    full_input_dir = input_dir / "2m_temperature"
+
+    # Calculate the aggregations for the necessary funcions.
+    for agg_func in ["min", "max"]:  # We want both the maximum and minimum temperature.
+        ds_merged_part = merge_dataset(full_input_dir, agg_func)
+        df_daily_part = spatial_aggregation(ds=ds_merged_part, boundaries=boundaries, agg_func=agg_func)
+        list_daily.append(df_daily_part)
+
+        df_weekly_part = get_weekly_aggregates(
+            df=df_daily_part,
+            agg_func=agg_func,
+        )
+        list_weekly.append(df_weekly_part)
+
+        df_monthly_part = get_monthly_aggregates(
+            df=df_daily_part,
+            agg_func=agg_func,
+        )
+        list_monthly.append(df_monthly_part)
+
+    # Calculate and save the daily aggregations
+    df_daily_full = concatenate_list_dfs(list_daily)
+    path_daily = Path(output_dir).joinpath("2m_temperature_daily.parquet").as_posix()
+    save_df(df_daily_full, path_daily)
+
+    # Calculate and save the weekly aggregations
+    df_weekly_full = concatenate_list_dfs(list_weekly)
+    df_weekly_full = format_df_weekly(df_weekly_full)
+    path_weekly = Path(output_dir).joinpath("2m_temperature_weekly.parquet").as_posix()
+    save_df(df_weekly_full, path_weekly)
+
+    # Calculate and save the monthly aggregations
+    df_monthly_full = concatenate_list_dfs(list_monthly)
+    path_monthly = Path(output_dir).joinpath("2m_temperature_monthly.parquet").as_posix()
+    save_df(df_monthly_full, path_monthly)
 
     # upload to table
-    upload_data_to_table(df=df_weekly, targetTable="cod_precipitation_weekly_auto")
-    # upload_data_to_table(df=df_monthly, targetTable="cod_precipitation_monthly_auto")
+    upload_data_to_table(df=df_weekly_full, targetTable="cod_temperature_weekly_auto")
 
-    # update dataset -- we only do this for the weekly data.
-    update_precipitation_dataset(df=df_weekly)
+    # update dataset -- we only do this for the weekly data
+    if not local:
+        update_temperature_dataset(df=df_weekly_full)
 
-    current_run.log_info("Precipitation data table updated")
+    current_run.log_info("Temperature data table updated")
 
 
 @era5_aggregate.task
 def load_boundaries(db_table: dict) -> gpd.GeoDataFrame:
     """Load boundaries from database."""
     current_run.log_info(f"Loading boundaries from {db_table}")
-    dbengine = create_engine(os.environ["WORKSPACE_DATABASE_URL"])
+    if local:
+        postgres_connection = workspace.postgresql_connection(db_table)
+        dbengine = create_engine(postgres_connection.url)
+    else:
+        dbengine = create_engine(os.environ["WORKSPACE_DATABASE_URL"])
     boundaries = gpd.read_postgis(db_table, con=dbengine, geom_col="geometry")
     return boundaries
 
 
-@era5_aggregate.task
-def aggregate_ERA5_data_daily(
-    input_dir: Path,
-    boundaries: gpd.GeoDataFrame,
-    output_dir: Path,
-    variable: str = "total_precipitation",
-) -> pl.DataFrame:
-    # merge all available files
-    ds_merged = get_merged_dataset(input_dir / variable)
+def format_df_weekly(df: pd.DataFrame) -> pd.DataFrame:
+    """Format the weekly dataframe to match the expected output format."""
+    dict_rename_first = {
+        "ref": "uid",
+        "start_date": "start",
+        "end_date": "end",
+        "epi_year": "year",
+        "epi_week": "week",
+    }
+    dict_second_rename = {"period": "epiweek"}
+    list_output = [
+        "uid",
+        "name",
+        "epiweek",
+        "tmin_min",
+        "tmin_max",
+        "tmin_mean",
+        "tmax_min",
+        "tmax_max",
+        "tmax_mean",
+        "start",
+        "end",
+        "year",
+        "week",
+    ]
+    df = df.rename(columns=dict_rename_first)
+    df = df.rename(columns=dict_second_rename)
+    df = df[list_output]
+    df["start"] = pd.to_datetime(df["start"])
+    df["end"] = pd.to_datetime(df["end"])
+    return df
 
-    ds_merged = ds_merged * 1000  # convert m to mm
 
-    # daily aggregation
-    df_daily = spatial_aggregation(
-        ds=ds_merged,
-        dst_file=Path(output_dir).joinpath(f"{variable}_daily.parquet").as_posix(),
-        boundaries=boundaries,
-    )
-
-    return df_daily
-
-
-@era5_aggregate.task
 def upload_data_to_table(df: pd.DataFrame, targetTable: str):
-    """Upload the processed precipitation data stats to target table."""
+    """Upload the processed temperature data stats to target table."""
 
     current_run.log_info(f"Updating table : {targetTable}")
 
     # Create engine
-    dbengine = create_engine(os.environ["WORKSPACE_DATABASE_URL"])
+    if local:
+        postgres_connection = workspace.postgresql_connection(targetTable)
+        dbengine = create_engine(postgres_connection.url)
+    else:
+        dbengine = create_engine(os.environ["WORKSPACE_DATABASE_URL"])
 
     # Create table
     df.to_sql(targetTable, dbengine, index=False, if_exists="replace", chunksize=4096)
@@ -130,14 +183,13 @@ def upload_data_to_table(df: pd.DataFrame, targetTable: str):
     del dbengine
 
 
-@era5_aggregate.task
-def update_precipitation_dataset(df: pd.DataFrame):
-    """Update the precipitation dataset to be shared."""
+def update_temperature_dataset(df: pd.DataFrame):
+    """Update the temperature dataset to be shared."""
 
-    current_run.log_info("Updating precipitation dataset")
+    current_run.log_info("Updating temperature dataset")
 
     # Get the dataset
-    dataset = workspace.get_dataset("climate-dataset-precipi-6349a3")
+    dataset = workspace.get_dataset("climate-dataset-tempera-39e1f8")
     date_version = f"ds_{datetime.now().strftime('%Y_%m_%d_%H%M')}"
 
     try:
@@ -148,10 +200,10 @@ def update_precipitation_dataset(df: pd.DataFrame):
         raise
 
     try:
-        # Add Precipitation .parquet to DS
+        # Add temperature .parquet to DS
         with tempfile.NamedTemporaryFile(suffix=".parquet") as tmp:
             df.to_parquet(tmp.name)
-            version.add_file(tmp.name, filename=f"Precipitation_{date_version}.parquet")
+            version.add_file(tmp.name, filename=f"Temperature_{date_version}.parquet")
     except Exception as e:
         current_run.log_error(f"Dataset file cannot be saved - ERROR: {e}")
         raise
@@ -201,7 +253,37 @@ def read_boundaries(boundaries_dataset: Dataset, filename: str | None = None) ->
     return gpd.read_file(BytesIO(ds_file.read()))
 
 
-def get_merged_dataset(input_dir: Path) -> pl.DataFrame:
+def concatenate_list_dfs(list_df):
+    """Concatenate a list of dataframes on common columns."""
+    common_cols = set()
+    df_merged = pd.DataFrame()
+    for df in list_df:
+        set_cols = set(df.columns)
+        if not common_cols:
+            common_cols = set_cols
+        else:
+            common_cols = common_cols.intersection(set_cols)
+
+    for df in list_df:
+        if df_merged.empty:
+            df_merged = df
+        else:
+            df_merged = pd.merge(df_merged, df, on=list(common_cols))
+
+    return df_merged
+
+
+def save_df(df, dst_file):
+    """Save dataframe to parquet file."""
+    fs = filesystem(dst_file)
+    with tempfile.NamedTemporaryFile(suffix=".parquet") as tmp:
+        df.to_parquet(tmp.name)
+        fs.put(tmp.name, dst_file)
+    current_run.add_file_output(dst_file)
+
+
+def merge_dataset(input_dir: Path, agg: str) -> pl.DataFrame:
+    """Merge the grib files in the input directory and return a xarray dataset."""
     # build xarray dataset by merging all available grib files across the time dimension
     with tempfile.TemporaryDirectory() as tmpdir:
         for file in input_dir.glob("*.grib"):
@@ -217,23 +299,61 @@ def get_merged_dataset(input_dir: Path) -> pl.DataFrame:
             else:
                 copyfile(src=file.as_posix(), dst=Path(tmpdir, file.name).as_posix())
 
-        ds = merge(Path(tmpdir))
-
-        # remove all non-precipitation variables.. merge is selecting maximum value
-        # ds = ds.dropna(dim="time", subset=["tp"])  # for temperature variable is called "t2m"
+        ds = daily_aggregations(Path(tmpdir), agg)
 
         # remove duplicated (if any) dates and sort
-        ds = ds.drop_duplicates(dim="time")
-        ds = ds.sortby("time")
+        # ds = ds.drop_duplicates(dim="time")
+        # ds = ds.sortby("time")
+
+    ds = ds.drop_duplicates(dim="time", keep="first")
+    ds = ds.where(~np.isnan(ds["t2m"]), drop=True)  # After the aggregation, we we rid of the NaNs in the temperature.
+    ds = ds - 273.15  # convert degrees K to degrees C
 
     return ds
 
 
-def spatial_aggregation(
-    ds: xr.Dataset,
-    dst_file: str,
-    boundaries: gpd.GeoDataFrame,
-) -> pd.DataFrame:
+def daily_aggregations(data_dir, agg: str):
+    """
+    Merge the hourly datasets. We want the ability to select the maximum and minimum values.
+    """
+    datasets = []
+
+    if isinstance(data_dir, str):
+        data_dir = Path(data_dir)
+
+    list_files = data_dir.glob("*.grib")
+
+    for datafile in list_files:
+        ds = xr.open_dataset(datafile)
+
+        if "valid_time" in ds.variables:
+            ds = ds.stack(record=["time", "step"])
+            ds = ds.set_index(record="valid_time")
+            ds = ds.sortby("record")
+
+        if agg == "mean":
+            ds["t2m"] = ds["t2m"].resample(record="1D").mean()
+        elif agg == "sum":
+            ds["t2m"] = ds["t2m"].resample(record="1D").sum()
+        elif agg == "min":
+            ds["t2m"] = ds["t2m"].resample(record="1D").min()
+        elif agg == "max":
+            ds["t2m"] = ds["t2m"].resample(record="1D").max()
+        else:
+            raise ValueError(f"{agg} is not a recognized aggregation method")
+
+        ds = ds.drop_vars(["time", "step"], errors="ignore").rename({"record": "time"})
+        datasets.append(ds)
+
+    ds = xr.concat(datasets, dim="time")
+
+    n = len(ds.longitude) * len(ds.latitude) * len(ds.time)
+    current_run.log_info(f"Merged {len(datasets)} hourly datasets ({n} measurements)")
+
+    return ds
+
+
+def spatial_aggregation(ds: xr.Dataset, boundaries: gpd.GeoDataFrame, agg_func: str) -> pd.DataFrame:
     """Apply spatial aggregation on dataset based on a set of boundaries.
 
     Final value for each boundary is equal to the mean of all cells
@@ -243,10 +363,11 @@ def spatial_aggregation(
     ----------
     ds : xr.Dataset
         Input dataset of shape (height, width, n_time_steps)
-    dst_file : str
-        Path to output file
     boundaries : gpd.GeoDataFrame
         Input boundaries
+    agg_func : str
+        Aggregation function
+
 
     Return
     ------
@@ -254,45 +375,6 @@ def spatial_aggregation(
         Mean value as a dataframe of length (n_boundaries * n_time_steps)
     """
     current_run.log_info("Running spatial aggregation ...")
-
-    df = _spatial_aggregation(
-        ds=ds,
-        boundaries=boundaries,
-    )
-
-    current_run.log_info(f"Applied spatial aggregation for {len(boundaries)} boundaries")
-
-    fs = filesystem(dst_file)
-    with tempfile.NamedTemporaryFile(suffix=".parquet") as tmp:
-        df.to_parquet(tmp.name)
-        fs.put(tmp.name, dst_file)
-    current_run.add_file_output(dst_file)
-
-    return df
-
-
-def _spatial_aggregation(
-    ds: xr.Dataset,
-    boundaries: gpd.GeoDataFrame,
-) -> pd.DataFrame:
-    """Apply spatial aggregation on dataset based on a set of boundaries.
-
-    Final value for each boundary is equal to the mean of all cells
-    intersecting the shape.
-
-    Parameters
-    ----------
-    ds : xr.Dataset
-        Input dataset of shape (height, width, n_time_steps)
-    boundaries : gpd.GeoDataFrame
-        Input boundaries
-
-    Return
-    ------
-    dataframe
-        Mean value as a dataframe of length (n_boundaries * n_time_steps)
-    """
-
     ncols = len(ds.longitude)
     nrows = len(ds.latitude)
     transform = get_transform(ds)
@@ -311,13 +393,23 @@ def _spatial_aggregation(
 
         for i, (_, row) in enumerate(boundaries.iterrows()):
             count_val = np.sum(areas[i, :, :])
-            sum_val = np.nansum(measurements[(measurements >= 0) & (areas[i, :, :])])  #
-            new_stats = pd.Series([str(day)[:10], count_val, sum_val], index=["period", "count", "sum"])
+            relevant_area = measurements[(measurements >= 0) & (areas[i, :, :])]
+            if relevant_area.size > 0:
+                mean_val = np.nanmean(relevant_area)
+            else:
+                mean_val = np.nan
+            # For the spatial dimension, we calculate the mean.
+            # For the time dimension, we calculate the max/min.
+            new_stats = pd.Series([str(day)[:10], count_val, mean_val], index=["period", "count", "mean"])
             records.append(pd.concat([row, new_stats]))
 
     records = pd.DataFrame(records)
     if "geometry" in records.columns:
         records = records.drop(columns=["geometry"])
+
+    records = records.rename(columns={"mean": f"t{agg_func}"})
+
+    current_run.log_info(f"Applied spatial aggregation for {len(boundaries)} boundaries")
 
     return records
 
@@ -361,33 +453,7 @@ def filesystem(target_path: str, cache_dir: str = None) -> fsspec.AbstractFileSy
         return fsspec.filesystem(protocol=target_protocol, client_kwargs=client_kwargs)
 
 
-@era5_aggregate.task
-def weekly(df: pd.DataFrame, dst_file: str) -> pd.DataFrame:
-    """Get weekly precipation from daily dataset."""
-    df_weekly = get_weekly_aggregates(df)
-    current_run.log_info(f"Applied weekly aggregation ({len(df_weekly)} measurements)")
-    fs = filesystem(dst_file)
-    with tempfile.NamedTemporaryFile(suffix=".parquet") as tmp:
-        df_weekly.to_parquet(tmp.name)
-        fs.put(tmp.name, dst_file)
-    current_run.add_file_output(dst_file)
-    return df_weekly
-
-
-@era5_aggregate.task
-def monthly(df: pd.DataFrame, dst_file: str) -> pd.DataFrame:
-    """Get monthly precipation from daily dataset."""
-    df_monthly = get_monthly_aggregates(df)
-    current_run.log_info(f"Applied montly aggregation ({len(df_monthly)} measurements)")
-    fs = filesystem(dst_file)
-    with tempfile.NamedTemporaryFile(suffix=".parquet") as tmp:
-        df_monthly.to_parquet(tmp.name)
-        fs.put(tmp.name, dst_file)
-    current_run.add_file_output(dst_file)
-    return df_monthly
-
-
-def get_weekly_aggregates(df: pd.DataFrame) -> pd.DataFrame:
+def get_weekly_aggregates(df: pd.DataFrame, agg_func: str) -> pd.DataFrame:
     """Apply weekly aggregation of input daily dataframe.
 
     Uses epidemiological weeks and assumes at least 4 columns in input
@@ -397,6 +463,8 @@ def get_weekly_aggregates(df: pd.DataFrame) -> pd.DataFrame:
     ----------
     df : dataframe
         Input dataframe
+    agg_func : str
+        Aggregation function
 
     Return
     ------
@@ -411,52 +479,72 @@ def get_weekly_aggregates(df: pd.DataFrame) -> pd.DataFrame:
     # Epiweek start end dates
     df_["start_date"] = df_["period"].apply(lambda day: EpiWeek(datetime.strptime(day, "%Y-%m-%d")).start).astype(str)
     df_["end_date"] = df_["period"].apply(lambda day: EpiWeek(datetime.strptime(day, "%Y-%m-%d")).end).astype(str)
-    df_["mid_date"] = df_["period"].apply(lambda day: _compute_mid_date(EpiWeek(datetime.strptime(day, "%Y-%m-%d"))))
+    df_["middle_date"] = (
+        df_["period"]
+        .apply(lambda day: _compute_mid_date(EpiWeek(datetime.strptime(day, "%Y-%m-%d"))))
+        .dt.date.astype(str)
+    )
 
-    # epiweek aggregation sum
-    sums = df_.groupby(by=["ref", "epi_year", "epi_week"])[["sum"]].sum().reset_index()
+    # epiweek aggregation with the agg
+    aggregations = (
+        df_.groupby(by=["ref", "epi_year", "epi_week"])[[f"t{agg_func}"]].agg(["min", "max", "mean"]).reset_index()
+    )
+    aggregations.columns = ["_".join(col).strip("_") for col in aggregations.columns.values]
+    aggregations = aggregations.rename(
+        columns={
+            f"t{agg_func}_min": f"t{agg_func}_min",
+            f"t{agg_func}_max": f"t{agg_func}_max",
+            f"t{agg_func}_mean": f"t{agg_func}_mean",
+        }
+    )
     data_left = df_.copy()
     data_left["period"] = data_left["period"].apply(lambda day: str(EpiWeek(datetime.strptime(day, "%Y-%m-%d"))))
-    data_left = data_left.drop(columns=["sum"])
+    data_left = data_left.drop(columns=[f"t{agg_func}"])
     data_left = data_left.drop_duplicates(subset=data_left.columns)  # unique rows
 
     # merge
-    merged_df = pd.merge(data_left, sums, on=["ref", "epi_year", "epi_week"], how="left")
-    merged_df["mid_date"] = pd.to_datetime(merged_df["mid_date"])
+    merged_df = pd.merge(data_left, aggregations, on=["ref", "epi_year", "epi_week"], how="left")
+    merged_df["middle_date"] = pd.to_datetime(merged_df["middle_date"])
 
     # fix format
     merged_df = merged_df[
         [
             "name_short",
+            "name",
             "ref",
             "parent_short",
-            "parent_ref",
-            "group_refs",
-            "group_names",
-            "uuid",
-            "name",
             "parent",
+            "parent_ref",
+            "group_names",
+            "group_refs",
+            "uuid",
             "period",
-            "count",
             "epi_year",
             "epi_week",
             "start_date",
+            "middle_date",
             "end_date",
-            "mid_date",
-            "sum",
+            "count",
+            f"t{agg_func}_min",
+            f"t{agg_func}_max",
+            f"t{agg_func}_mean",
         ]
     ]
 
+    current_run.log_info(f"Applied {agg_func} temperature aggregation ({len(merged_df)} measurements)")
     return merged_df
 
 
-def get_monthly_aggregates(df: pd.DataFrame) -> pd.DataFrame:
+def get_monthly_aggregates(df: pd.DataFrame, agg_func: str) -> pd.DataFrame:
     """Apply montly aggregation of input daily dataframe.
 
     Parameters
     ----------
     df : dataframe
         Input dataframe
+
+    agg_func : str
+        Aggregation function
 
     Return
     ------
@@ -471,41 +559,51 @@ def get_monthly_aggregates(df: pd.DataFrame) -> pd.DataFrame:
     # Start and end dates
     df_["start_date"] = df_["period"].values.astype("datetime64[M]")
     df_["end_date"] = df_["start_date"] + pd.offsets.MonthEnd(0)
-    df_["mid_date"] = df_["start_date"] + pd.Timedelta(days=14)
+    df_["middle_date"] = df_["start_date"] + pd.Timedelta(days=14)
 
-    # monthly aggregation sum
-    sums = df_.groupby(by=["ref", "year", "month"])[["sum"]].sum().reset_index()
+    # monthly aggregation calculation
+    aggregations = df_.groupby(by=["ref", "year", "month"])[[f"t{agg_func}"]].agg(["min", "max", "mean"]).reset_index()
+    aggregations.columns = ["_".join(col).strip("_") for col in aggregations.columns.values]
+    aggregations = aggregations.rename(
+        columns={
+            f"t{agg_func}_min": f"t{agg_func}_min",
+            f"t{agg_func}_max": f"t{agg_func}_max",
+            f"t{agg_func}_mean": f"t{agg_func}_mean",
+        }
+    )
+
     data_left = df_.copy()
     data_left["period"] = pd.to_datetime(data_left["period"]).dt.strftime("%Y-%m")
-    data_left = data_left.drop(columns=["sum"])
+    data_left = data_left.drop(columns=[f"t{agg_func}"])
     data_left = data_left.drop_duplicates(subset=data_left.columns)  # unique rows
 
     # merge
-    merged_df = pd.merge(data_left, sums, on=["ref", "year", "month"], how="left")
+    merged_df = pd.merge(data_left, aggregations, on=["ref", "year", "month"], how="left")
 
     # fix format
     merged_df = merged_df[
         [
             "name_short",
+            "name",
             "ref",
             "parent_short",
-            "parent_ref",
-            "group_refs",
-            "group_names",
-            "uuid",
-            "name",
             "parent",
+            "parent_ref",
+            "group_names",
+            "group_refs",
+            "uuid",
             "period",
-            "count",
             "year",
             "month",
             "start_date",
+            "middle_date",
             "end_date",
-            "mid_date",
-            "sum",
+            "count",
+            f"t{agg_func}_min",
+            f"t{agg_func}_max",
+            f"t{agg_func}_mean",
         ]
     ]
-
     return merged_df
 
 
