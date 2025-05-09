@@ -23,7 +23,6 @@ from openhexa.toolbox.era5.aggregate import (
 )
 from openhexa.toolbox.era5.cds import VARIABLES
 
-local = True
 warnings.simplefilter(action="ignore", category=FutureWarning)
 
 
@@ -70,74 +69,47 @@ def calculate_aggregations(boundaries, input_dir, output_dir):
     Calculate the daily, weekly and montly temperature aggregations.
     """
     # Initialize the variables
-    list_daily = []
-    list_weekly = []
-    list_monthly = []
     full_input_dir = input_dir / "2m_temperature"
-    dict_weekly = {}
 
     # Calculate the aggregations for the necessary funcions.
     for agg_func in ["min", "max"]:  # We want both the maximum and minimum temperature.
-        ds_merged_part = merge_dataset(full_input_dir, agg_func)
-        df_daily_part = spatial_aggregation(ds=ds_merged_part, boundaries=boundaries, agg_func=agg_func)
-        list_daily.append(df_daily_part)
-
-        df_weekly_part = get_weekly_aggregates(
-            df=df_daily_part,
+        ds_merged = merge_dataset(full_input_dir, agg_func)
+        df_daily = spatial_aggregation(ds=ds_merged, boundaries=boundaries, agg_func=agg_func)
+        df_weekly = get_weekly_aggregates(
+            df=df_daily,
             agg_func=agg_func,
         )
-        list_weekly.append(df_weekly_part)
-        dict_weekly[agg_func] = df_weekly_part
-
-        df_monthly_part = get_monthly_aggregates(
-            df=df_daily_part,
+        df_weekly = format_df_weekly(df_weekly, agg_func)
+        df_monthly = get_monthly_aggregates(
+            df=df_daily,
             agg_func=agg_func,
         )
-        list_monthly.append(df_monthly_part)
 
-    # Calculate and save the daily aggregations
-    df_daily_full = concatenate_list_dfs(list_daily)
-    path_daily = Path(output_dir).joinpath("2m_temperature_daily.parquet").as_posix()
-    save_df(df_daily_full, path_daily)
+        path_daily = Path(output_dir).joinpath(f"2m_temperature_t{agg_func}_daily.parquet").as_posix()
+        path_weekly = Path(output_dir).joinpath(f"2m_temperature_t{agg_func}_weekly.parquet").as_posix()
+        path_monthly = Path(output_dir).joinpath(f"2m_temperature_t{agg_func}_monthly.parquet").as_posix()
+        table_name = f"cod_temperature_t{agg_func}_weekly"
 
-    # Calculate and save the weekly aggregations
-    df_weekly_full = concatenate_list_dfs(list_weekly)
-    df_weekly_full = format_df_weekly(df_weekly_full)
-    path_weekly = Path(output_dir).joinpath("2m_temperature_weekly.parquet").as_posix()
-    save_df(df_weekly_full, path_weekly)
+        save_df(df_daily, path_daily)
+        save_df(df_weekly, path_weekly)
+        save_df(df_monthly, path_monthly)
 
-    # Calculate and save the monthly aggregations
-    df_monthly_full = concatenate_list_dfs(list_monthly)
-    path_monthly = Path(output_dir).joinpath("2m_temperature_monthly.parquet").as_posix()
-    save_df(df_monthly_full, path_monthly)
+        upload_data_to_table(df=df_weekly, targetTable=table_name)
+        update_temperature_dataset(df=df_weekly, agg_func=agg_func)
 
-    # upload to table
-    names_of_tables = {"min": "cod_temperature_tmin_weekly_test", "max": "cod_temperature_tmax_weekly_test"}
-    for agg_func, target_table in names_of_tables.items():
-        df_weekly = dict_weekly[agg_func]
-        upload_data_to_table(df=df_weekly, targetTable=target_table)
-
-    # update dataset -- we only do this for the weekly data
-    if not local:
-        update_temperature_dataset(dict=dict_weekly)
-
-    current_run.log_info("Temperature data table updated")
+        current_run.log_info(f"{agg_func}-Temperature data table updated")
 
 
 @era5_aggregate.task
 def load_boundaries(db_table: dict) -> gpd.GeoDataFrame:
     """Load boundaries from database."""
     current_run.log_info(f"Loading boundaries from {db_table}")
-    if local:
-        postgres_connection = workspace.postgresql_connection(db_table)
-        dbengine = create_engine(postgres_connection.url)
-    else:
-        dbengine = create_engine(os.environ["WORKSPACE_DATABASE_URL"])
+    dbengine = create_engine(os.environ["WORKSPACE_DATABASE_URL"])
     boundaries = gpd.read_postgis(db_table, con=dbengine, geom_col="geometry")
     return boundaries
 
 
-def format_df_weekly(df: pd.DataFrame) -> pd.DataFrame:
+def format_df_weekly(df: pd.DataFrame, agg_func: str) -> pd.DataFrame:
     """Format the weekly dataframe to match the expected output format."""
     dict_rename_first = {
         "ref": "uid",
@@ -151,12 +123,9 @@ def format_df_weekly(df: pd.DataFrame) -> pd.DataFrame:
         "uid",
         "name",
         "epiweek",
-        "tmin_min",
-        "tmin_max",
-        "tmin_mean",
-        "tmax_min",
-        "tmax_max",
-        "tmax_mean",
+        f"t{agg_func}_min",
+        f"t{agg_func}_max",
+        f"t{agg_func}_mean",
         "start",
         "end",
         "year",
@@ -176,11 +145,7 @@ def upload_data_to_table(df: pd.DataFrame, targetTable: str):
     current_run.log_info(f"Updating table : {targetTable}")
 
     # Create engine
-    if local:
-        postgres_connection = workspace.postgresql_connection(targetTable)
-        dbengine = create_engine(postgres_connection.url)
-    else:
-        dbengine = create_engine(os.environ["WORKSPACE_DATABASE_URL"])
+    dbengine = create_engine(os.environ["WORKSPACE_DATABASE_URL"])
 
     # Create table
     df.to_sql(targetTable, dbengine, index=False, if_exists="replace", chunksize=4096)
@@ -188,7 +153,7 @@ def upload_data_to_table(df: pd.DataFrame, targetTable: str):
     del dbengine
 
 
-def update_temperature_dataset(dict: dict):
+def update_temperature_dataset(df: pd.DataFrame, agg_func: str):
     """Update the temperature dataset to be shared."""
 
     current_run.log_info("Updating temperature dataset")
@@ -198,21 +163,20 @@ def update_temperature_dataset(dict: dict):
     date_version = f"ds_{datetime.now().strftime('%Y_%m_%d_%H%M')}"
     added_new = False
 
-    for agg_func, df in dict.items():
-        try:
-            with tempfile.NamedTemporaryFile(suffix=".parquet") as tmp:
-                # If we have not created the new version yet, we create it.
-                if not added_new:
-                    version = dataset.create_version(date_version)
-                    current_run.log_info(f"New dataset version {date_version} created")
-                    added_new = True
-                # Add temperature .parquet to DS
-                df.to_parquet(tmp.name)
-                file_name = f"Temperature_t{agg_func}_{date_version}.parquet"
-                version.add_file(tmp.name, filename=file_name)
-        except Exception as e:
-            current_run.log_error(f"Dataset file cannot be saved - ERROR: {e}")
-            raise
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".parquet") as tmp:
+            # If we have not created the new version yet, we create it.
+            if not added_new:
+                version = dataset.create_version(date_version)
+                current_run.log_info(f"New dataset version {date_version} created")
+                added_new = True
+            # Add temperature .parquet to DS
+            df.to_parquet(tmp.name)
+            file_name = f"Temperature_t{agg_func}_{date_version}.parquet"
+            version.add_file(tmp.name, filename=file_name)
+    except Exception as e:
+        current_run.log_error(f"Dataset file cannot be saved - ERROR: {e}")
+        raise
 
     current_run.log_info(f"New dataset version {date_version} created")
 
@@ -257,26 +221,6 @@ def read_boundaries(boundaries_dataset: Dataset, filename: str | None = None) ->
         return gpd.read_parquet(BytesIO(ds_file.read()))
 
     return gpd.read_file(BytesIO(ds_file.read()))
-
-
-def concatenate_list_dfs(list_df):
-    """Concatenate a list of dataframes on common columns."""
-    common_cols = set()
-    df_merged = pd.DataFrame()
-    for df in list_df:
-        set_cols = set(df.columns)
-        if not common_cols:
-            common_cols = set_cols
-        else:
-            common_cols = common_cols.intersection(set_cols)
-
-    for df in list_df:
-        if df_merged.empty:
-            df_merged = df
-        else:
-            df_merged = pd.merge(df_merged, df, on=list(common_cols))
-
-    return df_merged
 
 
 def save_df(df, dst_file):
@@ -354,7 +298,7 @@ def daily_aggregations(data_dir, agg: str):
     ds = xr.concat(datasets, dim="time")
 
     n = len(ds.longitude) * len(ds.latitude) * len(ds.time)
-    current_run.log_info(f"Merged {len(datasets)} hourly datasets ({n} measurements)")
+    current_run.log_info(f"Merged {len(datasets)} hourly datasets ({n} measurements) for the {agg} aggregation")
 
     return ds
 
@@ -380,7 +324,7 @@ def spatial_aggregation(ds: xr.Dataset, boundaries: gpd.GeoDataFrame, agg_func: 
     dataframe
         Mean value as a dataframe of length (n_boundaries * n_time_steps)
     """
-    current_run.log_info("Running spatial aggregation ...")
+    current_run.log_info(f"Running spatial aggregation for the {agg_func} calculation...")
     ncols = len(ds.longitude)
     nrows = len(ds.latitude)
     transform = get_transform(ds)
@@ -415,7 +359,7 @@ def spatial_aggregation(ds: xr.Dataset, boundaries: gpd.GeoDataFrame, agg_func: 
 
     records = records.rename(columns={"mean": f"t{agg_func}"})
 
-    current_run.log_info(f"Applied spatial aggregation for {len(boundaries)} boundaries")
+    current_run.log_info(f"Applied spatial aggregation for {len(boundaries)} boundaries for {agg_func} calculation")
 
     return records
 
