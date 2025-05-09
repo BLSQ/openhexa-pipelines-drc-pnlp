@@ -32,14 +32,14 @@ warnings.simplefilter(action="ignore", category=FutureWarning)
     type=str,
     name="Input directory",
     help="Input directory with raw ERA5 extracts",
-    default="data/era5/full_raw",
+    default="pipelines/era5_temperature_extract/data/raw",
 )
 @parameter(
     "output_dir",
     type=str,
     name="Output directory",
     help="Output directory for the aggregated data",
-    default="data/era5/full_aggregate",
+    default="pipelines/era5_temperature_aggregate/data/aggregate",
 )
 def era5_aggregate(
     input_dir: str,
