@@ -96,7 +96,7 @@ def calculate_aggregations(boundaries, input_dir, output_dir):
         save_df(df_monthly, path_monthly)
 
         upload_data_to_table(df=df_weekly, targetTable=table_name)
-        update_temperature_dataset(df=df_weekly, agg_func=agg_func, version=version)
+        version = update_temperature_dataset(df=df_weekly, agg_func=agg_func, version=version)
 
         current_run.log_info(f"{agg_func}-Temperature data table updated")
 
@@ -178,6 +178,8 @@ def update_temperature_dataset(df: pd.DataFrame, agg_func: str, version):
         raise
 
     current_run.log_info(f"New dataset version {date_version} created")
+
+    return version
 
 
 def read_boundaries(boundaries_dataset: Dataset, filename: str | None = None) -> gpd.GeoDataFrame:
