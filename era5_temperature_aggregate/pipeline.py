@@ -70,6 +70,7 @@ def calculate_aggregations(boundaries, input_dir, output_dir):
     """
     # Initialize the variables
     full_input_dir = input_dir / "2m_temperature"
+    version = False
 
     # Calculate the aggregations for the necessary funcions.
     for agg_func in ["min", "max"]:  # We want both the maximum and minimum temperature.
@@ -95,7 +96,7 @@ def calculate_aggregations(boundaries, input_dir, output_dir):
         save_df(df_monthly, path_monthly)
 
         upload_data_to_table(df=df_weekly, targetTable=table_name)
-        update_temperature_dataset(df=df_weekly, agg_func=agg_func)
+        update_temperature_dataset(df=df_weekly, agg_func=agg_func, version=version)
 
         current_run.log_info(f"{agg_func}-Temperature data table updated")
 
@@ -153,7 +154,7 @@ def upload_data_to_table(df: pd.DataFrame, targetTable: str):
     del dbengine
 
 
-def update_temperature_dataset(df: pd.DataFrame, agg_func: str):
+def update_temperature_dataset(df: pd.DataFrame, agg_func: str, version):
     """Update the temperature dataset to be shared."""
 
     current_run.log_info("Updating temperature dataset")
@@ -161,15 +162,13 @@ def update_temperature_dataset(df: pd.DataFrame, agg_func: str):
     # Get the dataset
     dataset = workspace.get_dataset("climate-dataset-tempera-39e1f8")
     date_version = f"ds_{datetime.now().strftime('%Y_%m_%d_%H%M')}"
-    added_new = False
 
     try:
         with tempfile.NamedTemporaryFile(suffix=".parquet") as tmp:
             # If we have not created the new version yet, we create it.
-            if not added_new:
+            if not version:
                 version = dataset.create_version(date_version)
                 current_run.log_info(f"New dataset version {date_version} created")
-                added_new = True
             # Add temperature .parquet to DS
             df.to_parquet(tmp.name)
             file_name = f"Temperature_t{agg_func}_{date_version}.parquet"
