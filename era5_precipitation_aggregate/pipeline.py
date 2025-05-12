@@ -139,17 +139,16 @@ def update_precipitation_dataset(df: pd.DataFrame):
     # Get the dataset
     dataset = workspace.get_dataset("climate-dataset-precipi-6349a3")
     date_version = f"ds_{datetime.now().strftime('%Y_%m_%d_%H%M')}"
+    added_new = False
 
     try:
-        # Create new DS version
-        version = dataset.create_version(date_version)
-    except Exception as e:
-        current_run.log_error(f"The dataset version already exists - ERROR: {e}")
-        raise
-
-    try:
-        # Add Precipitation .parquet to DS
         with tempfile.NamedTemporaryFile(suffix=".parquet") as tmp:
+            if not added_new:
+                # Create new DS version
+                version = dataset.create_version(date_version)
+                current_run.log_info(f"New dataset version {date_version} created")
+                added_new = True
+            # Add Precipitation .parquet to DS
             df.to_parquet(tmp.name)
             version.add_file(tmp.name, filename=f"Precipitation_{date_version}.parquet")
     except Exception as e:
