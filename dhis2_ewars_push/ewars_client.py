@@ -2,6 +2,7 @@ import requests
 import json
 import pandas as pd
 import re
+from openhexa.sdk import current_run
 
 
 class EWARSClient:
@@ -156,12 +157,12 @@ class EWARSClient:
             response = self._get(endpoint="reports", params=params)
             resp_value = response.json().get("value", None)
             if not resp_value:
-                return []
+                return pd.DataFrame()
             reports_df = pd.json_normalize(resp_value)
             "data"
             reports_df.columns = self.clean_strings(input_list=reports_df.columns)
             reports_df.columns = reports_df.columns.str.replace("^data_", "", regex=True)  # remove extra "data_"
             return reports_df
         except Exception as e:
-            print(f"Error while retrieving forms: {e}")
-            return []
+            current_run.log_info(f"Error while retrieving forms: {e}")
+            return pd.DataFrame()
