@@ -1,4 +1,5 @@
 import pandas as pd
+import polars as pl
 import os
 from datetime import datetime, date, timedelta
 from unidecode import unidecode
@@ -27,7 +28,7 @@ from ewars_client import EWARSClient
     help="Format DDMMYYYY. Included to the largest epi-week.",
     type=int,
     required=True,
-    default=20240101,
+    default=20250101,
 )
 @parameter(
     "date_end",
@@ -35,7 +36,7 @@ from ewars_client import EWARSClient
     help="Format DDMMYYYY. Included to the largest epi-week.",
     type=int,
     required=True,
-    default=20240131,
+    default=20250331,
 )
 def dhis2_ewars_push(extract_pyramids, extract_all_ewars, date_start, date_end):
     """
@@ -51,6 +52,7 @@ def dhis2_ewars_push(extract_pyramids, extract_all_ewars, date_start, date_end):
     ewars_extract_list = extract_ewars_forms(list_dates, ewars, extract_all_ewars)
     ewars_extract_concat = concat_ewars_forms(ewars_extract_list)
     ewars_formatted = format_ewars_extract(ewars_extract_concat, full_pyramid)
+    # We still need to format this into something that can be ingested into DHIS2.
 
 
 @dhis2_ewars_push.task
@@ -72,7 +74,7 @@ def get_ewars_pyramid(extract_pyramids: bool, ewars: EWARSClient):
     path_pyramid = f"{workspace.files_path}/pipelines/dhis2_ewars_push/raw/pyramids/ewars_pyramid.parquet"
     if extract_pyramids or not os.path.exists(path_pyramid):
         ewars_pyramid = extract_ewars_pyramid(ewars)
-        path_pyramid = f"{workspace.files_path}/pipelines/dhis2_ewars_push/raw/pyramids/ewars_pyramid_leyre.parquet"
+        path_pyramid = f"{workspace.files_path}/pipelines/dhis2_ewars_push/raw/pyramids/ewars_pyramid.parquet"
         ewars_pyramid.to_parquet(path_pyramid)
     else:
         ewars_pyramid = pd.read_parquet(path_pyramid)
@@ -102,7 +104,7 @@ def get_dhis2_pyramid(extract_pyramids: bool, dhis2: DHIS2):
     path_pyramid = f"{workspace.files_path}/pipelines/dhis2_ewars_push/raw/pyramids/dhis2_pyramid.parquet"
     if extract_pyramids or not os.path.exists(path_pyramid):
         dhis2_pyramid = extract_dhis2_pyramid(dhis2)
-        path_pyramid = f"{workspace.files_path}/pipelines/dhis2_ewars_push/raw/pyramids/dhis2_pyramid_leyre.parquet"
+        path_pyramid = f"{workspace.files_path}/pipelines/dhis2_ewars_push/raw/pyramids/dhis2_pyramid.parquet"
         dhis2_pyramid.to_parquet(path_pyramid)
     else:
         dhis2_pyramid = pd.read_parquet(path_pyramid)
@@ -143,7 +145,7 @@ def match_pyramid(df_ewars: pd.DataFrame, df_dhis2: pd.DataFrame, extract_pyrami
     """
     path_full_pyramid = f"{workspace.files_path}/pipelines/dhis2_ewars_push/raw/pyramids/full_pyramid.parquet"
     if extract_pyramids or not os.path.exists(path_full_pyramid):
-        pass
+        current_run.log_info("Creating the full pyramid by matching ewars and dhis2 pyramids")
     else:
         full_pyramid = pd.read_parquet(path_full_pyramid)
         current_run.log_info("Using the already extracted full pyramid")
@@ -196,16 +198,31 @@ def check_pyramid(pyramid: pd.DataFrame):
     """
     Some checks on the pyramid.
     """
+    current_run.log_info("Checking the created pyramid for incoherences...")
     repeated_dhis2_id = pyramid[pyramid["dhis2_level_4_id"].duplicated(keep=False)]
+    # If the ewars name is also repeated, we do not care -- it is just that the same ewars name has two ids.
+    unique_pairs = repeated_dhis2_id[
+        ~repeated_dhis2_id.duplicated(subset=["dhis2_level_4_id", "ewars_level_4_name_cleaned"], keep=False)
+    ]
     repeated_ewars_id = pyramid[pyramid["ewars_level_4_id"].duplicated(keep=False)]
-    if not repeated_dhis2_id.empty:
+    if not unique_pairs.empty:
         current_run.log_error(
-            f"Some DHIS2 level 4 ids are duplicated in the pyramid. {len(repeated_dhis2_id)} duplicates found."
+            f"Some DHIS2 level 4 ids are duplicated in the pyramid. {len(unique_pairs)} duplicates found."
         )
+        dt = datetime.now().strftime("%Y%m%d_%H%M%S")
+        path_dhis2_repeated = (
+            f"{workspace.files_path}/pipelines/dhis2_ewars_push/processed/repeated_values/dhis2_repeated_{dt}.parquet"
+        )
+        unique_pairs.to_parquet(path_dhis2_repeated)
     if not repeated_ewars_id.empty:
         current_run.log_error(
             f"Some EWARS level 4 ids are duplicated in the pyramid. {len(repeated_ewars_id)} duplicates found."
         )
+        dt = datetime.now().strftime("%Y%m%d_%H%M%S")
+        path_ewars_repeated = (
+            f"{workspace.files_path}/pipelines/dhis2_ewars_push/processed/repeated_values/ewars_repeated_{dt}.parquet"
+        )
+        repeated_ewars_id.to_parquet(path_ewars_repeated)
 
 
 @dhis2_ewars_push.task
@@ -233,6 +250,7 @@ def get_list_dates(date_start: int, date_end: int):
     end_date_epi = get_beginning_of_epi_week(end_date) + timedelta(days=6)
 
     list_dates = pd.date_range(start=start_date_epi, end=end_date_epi).to_list()
+    current_run.log_info(f"I am going to extract the ewars forms from {start_date_epi} to {end_date_epi}")
     return list_dates
 
 
@@ -303,67 +321,105 @@ def format_ewars_extract(ewars_not_melted: pd.DataFrame, full_pyramid: pd.DataFr
     pd.DataFrame
         The formatted ewars extract.
     """
-    ewars_extract = pd.melt(
-        ewars_not_melted,
-        id_vars=config.relevant_info_cols,
-        var_name="variable",
+    pl_ewars_not_melted = pl.from_pandas(ewars_not_melted)
+    pl_full_pyramid = pl.from_pandas(full_pyramid)
+
+    pl_ewars_not_melted = pl_ewars_not_melted.join(
+        pl_full_pyramid, left_on="location_id", right_on="ewars_level_4_id", how="left"
+    )
+    current_run.log_info("I have merged the ewars extract with the full pyramid.")
+
+    pl_ewars_extract = pl_ewars_not_melted.melt(
+        id_vars=config.relevant_info_cols + config.relevant_level_cols,
+        variable_name="variable",
         value_name="value",
     )
-    ewars_extract["date"] = pd.to_datetime(ewars_extract["date"])
-    ewars_extract["epi_week"] = ewars_extract["date"].apply(lambda x: get_epi_week(x.date()))
-    ewars_extract.drop(columns=["date"], inplace=True)
+    current_run.log_info("I have melted the ewars extract and summed the values.")
 
-    ewars_extract = look_at_value_col(ewars_extract)
+    pl_ewars_extract = pl_ewars_extract.with_columns(pl.col("date").str.to_date())
+    pl_ewars_extract = pl_ewars_extract.with_columns(
+        pl.col("date").map_elements(lambda date: get_epi_week(date), return_dtype=pl.Utf8).alias("epi_week"),
+    ).drop("date")
+    current_run.log_info("I have added the epi_week column to the ewars extract.")
+    pl_ewars_extract = look_at_value_col(pl_ewars_extract)
 
-    ewars_extract = ewars_extract.groupby(["location_id", "variable", "epi_week"], as_index=False)["value"].sum()
+    pl_ewars_extract = pl_ewars_extract.group_by(
+        ["location_id", "variable", "epi_week"] + config.relevant_level_cols
+    ).agg(pl.col("value").sum().alias("value"))
+    current_run.log_info("I have summed the values for each location and variable.")
 
-    ewars_extract = ewars_extract.merge(full_pyramid, left_on="location_id", right_on="ewars_level_4_id", how="left")
+    ewars_extract = pl_ewars_extract.to_pandas()
 
-    ewars_extract = ewars_extract[config.ewars_formated_cols]
+    # ewars_extract = ewars_extract[config.ewars_formated_cols]
+
+    dt = datetime.now().strftime("%Y%m%d_%H%M%S")
+    path_ewars_extract = (
+        f"{workspace.files_path}/pipelines/dhis2_ewars_push/processed/ewars_forms/ewars_extract_{dt}.parquet"
+    )
+    ewars_extract.to_parquet(path_ewars_extract)
 
     return ewars_extract
 
 
-def look_at_value_col(ewars_extract: pd.DataFrame):
-    ewars_numeric = ewars_extract.copy()
-    ewars_numeric["value"] = pd.to_numeric(ewars_numeric["value"], errors="coerce")
+def look_at_value_col(ewars_extract: pl.DataFrame):
+    """
+    Look at the values extracted from EWARS to detect the unusual ones.
 
-    ser_non_numeric = pd.to_numeric(ewars_extract["value"], errors="coerce").isna()
-    ser_multiple_zeros = ewars_extract["value"].isin(["0.0", ".0", "00", "000"])
-    ser_non_integers = ewars_numeric["value"] % 1 != 0
-    ser_big_values = ewars_numeric["value"] > 1000
+    Parameters
+    ----------
+    ewars_extract : pl.DataFrame
+        The ewars extract.
+
+    Returns
+    -------
+    pl.DataFrame
+        The ewars extract with the values formatted.
+    """
+    current_run.log_info("Looking at the values extracted from EWARS to detect the unusual ones...")
+    ewars_numeric = ewars_extract.clone()
+
+    ewars_numeric = ewars_numeric.with_columns(pl.col("value").cast(pl.Float64, strict=False))
+
+    ser_non_numeric = ewars_extract.select(pl.col("value").is_null().alias("non_numeric"))["non_numeric"]
+    ser_multiple_zeros = ewars_extract.select(
+        pl.col("value").is_in(["0.0", ".0", "00", "000"]).alias("multiple_zeros")
+    )["multiple_zeros"]
+    ser_non_integers = ewars_numeric.select(
+        ((pl.col("value") % 1 != 0) & pl.col("value").is_not_null()).alias("non_integers")
+    )["non_integers"]
+    ser_big_values = ewars_numeric.select((pl.col("value") > 1000).alias("big_values"))["big_values"]
     ser_seems_okey = ~ser_non_numeric & ~ser_multiple_zeros & ~ser_non_integers & ~ser_big_values
 
-    ewars_non_numeric = ewars_extract[ser_non_numeric]
-    ewars_multiple_zeros = ewars_extract[ser_multiple_zeros]
-    ewars_non_integers = ewars_numeric[ser_non_integers]
-    ewars_big_values = ewars_numeric[ser_big_values]
-    ewars_seems_okey = ewars_numeric[ser_seems_okey]
+    ewars_non_numeric = ewars_numeric.filter(ser_non_numeric)
+    ewars_multiple_zeros = ewars_numeric.filter(ser_multiple_zeros)
+    ewars_non_integers = ewars_numeric.filter(ser_non_integers)
+    ewars_big_values = ewars_numeric.filter(ser_big_values)
+    ewars_seems_okey = ewars_numeric.filter(ser_seems_okey)
 
-    if not ewars_non_numeric.empty:
+    if not ewars_non_numeric.height > 0:
         current_run.log_info(
             "There are non numeric values in the ewars_extract. I have saved all of the strange values in a csv."
         )
-    if not ewars_multiple_zeros.empty:
+    if not ewars_multiple_zeros.height > 0:
         current_run.log_info(
             "There are weirdly formatted zeros in the ewars_extract. I have saved all of the strange values in a csv."
         )
-    if not ewars_non_integers.empty:
+    if not ewars_non_integers.height > 0:
         current_run.log_info(
             "There are non-integer values in the ewars_extract. I have saved all of the strange values in a csv."
         )
-    if not ewars_big_values.empty:
+    if not ewars_big_values.height > 0:
         current_run.log_info(
             "There are very big values in the ewars_extract. I have saved all of the strange values in a csv."
         )
 
-    ewars_weird = pd.concat([ewars_non_numeric, ewars_multiple_zeros, ewars_non_integers, ewars_big_values])
-    if not ewars_weird.empty:
+    ewars_weird = pl.concat([ewars_non_numeric, ewars_multiple_zeros, ewars_non_integers, ewars_big_values])
+    if ewars_weird.height > 0:
         dt = datetime.now().strftime("%Y%m%d_%H%M%S")
         path = (
             f"{workspace.files_path}/pipelines/dhis2_ewars_push/processed/strange_ewars_values/strange_ewars_{dt}.csv"
         )
-        ewars_weird.to_csv(path, index=False)
+        ewars_weird.write_csv(path)
 
     return ewars_numeric
 
@@ -447,6 +503,7 @@ def clean_dhis2_pyramid(raw_pyramid: pd.DataFrame):
     pd.DataFrame
         The cleaned DHIS2 pyramid dataframe.
     """
+    current_run.log_info("Cleaning the DHIS2 pyramid dataframe...")
     pyramid = raw_pyramid[raw_pyramid["level"] == 4][
         [
             "level_1_name",
@@ -488,14 +545,19 @@ def clean_ewars_pyramid(raw_pyramid: pd.DataFrame):
     pd.DataFrame
         The cleaned ewars pyramid dataframe.
     """
+    current_run.log_info("Cleaning the ewars pyramid dataframe...")
     nan_fr = (raw_pyramid["name_fr"].isna()) | (raw_pyramid["name_fr"] == "")
     nan_en = (raw_pyramid["name_en"].isna()) | (raw_pyramid["name_en"] == "")
     nan_fr_nonan_en = nan_fr & (~nan_en)
     raw_pyramid.loc[nan_fr_nonan_en, "name_fr"] = raw_pyramid.loc[nan_fr_nonan_en, "name_en"]
-    all_levels = raw_pyramid[
-        (raw_pyramid["status"] == "ACTIVE") & (raw_pyramid["name_fr"].notna()) & (raw_pyramid["name_fr"] != "")
-    ][["uuid", "name_fr", "parent_id", "location_type_id"]]
-
+    # all_levels = raw_pyramid[
+    #    (raw_pyramid["status"] == "ACTIVE") & (raw_pyramid["name_fr"].notna()) & (raw_pyramid["name_fr"] != "")
+    # ][["uuid", "name_fr", "parent_id", "location_type_id"]]
+    # We are still interested in some disabled locations, so I will not filter on status.
+    all_levels = raw_pyramid[(raw_pyramid["name_fr"].notna()) & (raw_pyramid["name_fr"] != "")][
+        ["uuid", "name_fr", "parent_id", "location_type_id"]
+    ]
+    current_run.log_info(f"I have dropped {len(raw_pyramid) - len(all_levels)} rows from the ewars pyramid.")
     level_1 = all_levels[all_levels["location_type_id"] == 11]
     level_2 = all_levels[all_levels["location_type_id"] == 5]
     level_3 = all_levels[all_levels["location_type_id"] == 28]
@@ -591,7 +653,7 @@ def clean_ewars_pyramid(raw_pyramid: pd.DataFrame):
                 pyramid.loc[relevant_level3 & (pyramid["level_4_name_cleaned"] == value_in), "level_4_name_cleaned"] = (
                     value_out
                 )
-
+    pyramid = pyramid[~pyramid["level_3_name_cleaned"].isna()]
     pyramid = pyramid.drop_duplicates()
     return pyramid
 
@@ -632,14 +694,14 @@ def clean_ous_names(
 
     # Remove the endings if they match (case-insensitive, accent-insensitive)
     for ending in endings_to_remove:
-        ending_norm = unidecode(ending).casefold().strip()
+        ending_norm = unidecode(ending).casefold()
         if ending_norm != "" and cleaned_norm.endswith(ending_norm):
             # Remove the actual suffix
             cleaned = cleaned[: -(len(ending))]
 
     # Remove the begginings if they match (case-insensitive, accent-insensitive)
     for beggining in begginings_to_remove:
-        beggining_norm = unidecode(beggining).casefold().strip()
+        beggining_norm = unidecode(beggining).casefold()
         if beggining_norm != "" and cleaned_norm.startswith(beggining_norm):
             # Remove the actual prefix
             cleaned = cleaned[len(beggining) :]
@@ -654,6 +716,7 @@ def get_dhis2(con_name: str = "drc"):
     Get the DHIS2 instance from the API.
     """
     con_dhis = workspace.dhis2_connection(con_name)
+    current_run.log_info("Connected to the DHIS2 instance.")
     return DHIS2(con_dhis)
 
 
@@ -666,6 +729,7 @@ def get_ewars(con_name: str = "ewars"):
     ewars_client = EWARSClient(
         user=ewars_conn.user, password=ewars_conn.password, aid=ewars_conn.aid, client=ewars_conn.client
     )
+    current_run.log_info("Connected to the EWARS instance.")
     return ewars_client
 
 
@@ -688,12 +752,12 @@ def extract_ewars_pyramid(ewars: EWARSClient):
     """try:
         raw_pyramid = ewars.get_locations()
     except:
-        # The API sometimes fails because of some connection issues. 
+        # The API sometimes fails because of some connection issues.
         current_run.log_error("Error while extracting the ewars pyramid from the API. Using the saved one instead.")
         path_pyramid = f"{workspace.files_path}/pipelines/dhis2_ewars_push/raw/pyramids/ewars_locations.parquet"
         raw_pyramid = pd.read_parquet(path_pyramid)"""
 
-    path_pyramid = f"{workspace.files_path}/pipelines/dhis2_ewars_push/raw/pyramids/ewars_locations.parquet"
+    path_pyramid = f"{workspace.files_path}/pipelines/dhis2_ewars_push/raw/pyramids/locations_new.parquet"
     raw_pyramid = pd.read_parquet(path_pyramid)
     pyramid = clean_ewars_pyramid(raw_pyramid)
     return pyramid
@@ -818,32 +882,25 @@ def match_name(df_ewars: pd.DataFrame, df_dhis2: pd.DataFrame, col_name: str, co
     col_dhis2_id = "dhis2_" + col_id
     col_score = "score_" + level
 
-    list_ewars_names = df_ewars[col_name].drop_duplicates().to_list()
-    list_dhis2_names = df_dhis2[col_name].drop_duplicates().to_list()
+    list_ewars = df_ewars[[col_name, col_id]].drop_duplicates().itertuples(index=False)
+    dict_dhis2 = dict(df_dhis2[[col_name, col_id]].drop_duplicates().values)
+    list_dhis2_names = list(dict_dhis2.keys())
     list_matches = []
     list_no_matches = []
 
-    for ewars_name in list_ewars_names:
+    for ewars_name, ewars_id in list_ewars:
         best_match = process.extractOne(ewars_name, list_dhis2_names, scorer=fuzz.ratio)
         if best_match[1] >= threshold:
-            list_matches.append([ewars_name, best_match[0], best_match[1]])
+            dhis2_name = best_match[0]
+            dhis2_id = dict_dhis2[dhis2_name]
+            list_matches.append([ewars_name, dhis2_name, best_match[1], ewars_id, dhis2_id])
         else:
             list_no_matches.append(ewars_name)
 
     if len(list_matches) > 0:
-        df_matches = pd.DataFrame(list_matches, columns=[col_ewars_name, col_dhis2_name, col_score])
-        df_matches[col_ewars_id] = df_matches[[col_ewars_name]].merge(
-            df_ewars[[col_name, col_id]].drop_duplicates(subset=[col_name]),
-            how="left",
-            left_on=col_ewars_name,
-            right_on=col_name,
-        )[col_id]
-        df_matches[col_dhis2_id] = df_matches[[col_dhis2_name]].merge(
-            df_dhis2[[col_name, col_id]].drop_duplicates(subset=[col_name]),
-            how="left",
-            left_on=col_dhis2_name,
-            right_on=col_name,
-        )[col_id]
+        df_matches = pd.DataFrame(
+            list_matches, columns=[col_ewars_name, col_dhis2_name, col_score, col_ewars_id, col_dhis2_id]
+        )
     else:
         df_matches = pd.DataFrame(columns=[col_ewars_name, col_dhis2_name, col_score, col_ewars_id, col_dhis2_id])
 
