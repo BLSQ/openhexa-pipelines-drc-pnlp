@@ -28,7 +28,7 @@ from ewars_client import EWARSClient
     help="Format DDMMYYYY. Included to the largest epi-week.",
     type=int,
     required=True,
-    default=20250101,
+    default=20241001,
 )
 @parameter(
     "date_end",
@@ -36,7 +36,7 @@ from ewars_client import EWARSClient
     help="Format DDMMYYYY. Included to the largest epi-week.",
     type=int,
     required=True,
-    default=20250331,
+    default=20241231,
 )
 def dhis2_ewars_push(extract_pyramids, extract_all_ewars, date_start, date_end):
     """
@@ -561,7 +561,7 @@ def clean_ewars_pyramid(raw_pyramid: pd.DataFrame):
     level_1 = all_levels[all_levels["location_type_id"] == 11]
     level_2 = all_levels[all_levels["location_type_id"] == 5]
     level_3 = all_levels[all_levels["location_type_id"] == 28]
-    level_4 = all_levels[all_levels["location_type_id"] == 29]
+    level_4 = all_levels[all_levels["location_type_id"].isin([30, 29])]
     pyramid = (
         level_4.merge(
             level_3,
