@@ -36,7 +36,7 @@ from ewars_client import EWARSClient
     help="Format DDMMYYYY. Included to the largest epi-week.",
     type=int,
     required=True,
-    default=20241231,
+    default=20241031,
 )
 def dhis2_ewars_push(extract_pyramids, extract_all_ewars, date_start, date_end):
     """
@@ -51,8 +51,45 @@ def dhis2_ewars_push(extract_pyramids, extract_all_ewars, date_start, date_end):
     list_dates = get_list_dates(date_start, date_end)
     ewars_extract_list = extract_ewars_forms(list_dates, ewars, extract_all_ewars)
     ewars_extract_concat = concat_ewars_forms(ewars_extract_list)
-    ewars_formatted = format_ewars_extract(ewars_extract_concat, full_pyramid)
-    # We still need to format this into something that can be ingested into DHIS2.
+    ewars_formated = format_ewars_extract(ewars_extract_concat, full_pyramid)
+    ewars_dhis2 = put_dhis2_format(ewars_formated)
+
+
+@dhis2_ewars_push.task
+def put_dhis2_format(ewars_extract: pd.DataFrame):
+    """
+    Adapt the Ewars data to a format we can push to DHIS2.
+
+    Parameters
+    ----------
+    ewars_extract : pd.DataFrame
+        The ewars extract. It contains all of the Ewars data that we want to push to DHIS2.
+
+    Returns
+    -------
+    List[dict]
+        The ewars extract in the DHIS2 format.
+    """
+    current_run.log_info("Adapting the ewars extract to the DHIS2 format...")
+    values_to_post = []
+    for index, row in ewars_extract.iterrows():
+        service = row["variable"]
+        dataElement = config.dict_dE_CoC[service][0]
+        categoryOptionCombo = config.dict_dE_CoC[service][1]
+        orgUnit = row["dhis2_level_4_id"]
+        value = str(row["value"])
+        period = row["epi_week"]
+        values_to_post.append(
+            {
+                "dataElement": dataElement,
+                "categoryOptionCombo": categoryOptionCombo,
+                "orgUnit": orgUnit,
+                "value": value,
+                "period": period,
+            }
+        )
+
+    return values_to_post
 
 
 @dhis2_ewars_push.task

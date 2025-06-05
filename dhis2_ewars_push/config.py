@@ -113,3 +113,21 @@ relevant_level_cols = [
 ]
 relevant_ewars_forms_cols = relevant_info_cols + relevant_malaria_cols
 ewars_formated_cols = ["variable", "value", "epi_week", "dhis2_level_4_id"]
+dict_dE_CoC = relevant_malaria_cols = {
+    "paludisme_suspect_s1_paludisme_suspect-cas_0-11mois": ["jtxlVOyX9UD", "LPC4AtW5l03"],
+    "paludisme_suspect_s1_paludisme_suspect-cas_12-59mois": ["jtxlVOyX9UD", "jGlFZ1m4k7d"],
+    "paludisme_suspect_s1_paludisme_suspect-cas_5-15ans": ["jtxlVOyX9UD", "aOSANPvwJSP"],
+    "paludisme_suspect_s1_paludisme_suspect-cas_>15ans": ["jtxlVOyX9UD", "Coa89kwZpQG"],
+    "paludisme_suspect_s1_paludisme_suspect-deces_0-11mois": ["RvnnOHzyyl5", "LPC4AtW5l03"],
+    "paludisme_suspect_s1_paludisme_suspect-deces_12-59mois": ["RvnnOHzyyl5", "jGlFZ1m4k7d"],
+    "paludisme_suspect_s1_paludisme_suspect-deces_5-15ans": ["RvnnOHzyyl5", "aOSANPvwJSP"],
+    "paludisme_suspect_s1_paludisme_suspect-deces_>15ans": ["RvnnOHzyyl5", "Coa89kwZpQG"],
+    "paludisme_confirm_**_s1_paludisme_confirm-cas_0-11mois": ["hPp0eZ1ahtB", "LPC4AtW5l03"],
+    "paludisme_confirm_**_s1_paludisme_confirm-cas_12-59mois": ["hPp0eZ1ahtB", "jGlFZ1m4k7d"],
+    "paludisme_confirm_**_s1_paludisme_confirm-cas_5-15ans": ["hPp0eZ1ahtB", "aOSANPvwJSP"],
+    "paludisme_confirm_**_s1_paludisme_confirm-cas_>15ans": ["hPp0eZ1ahtB", "Coa89kwZpQG"],
+    "paludisme_confirm_**_s1_paludisme_confirm-deces_0-11mois": ["kVj09UWaJLJ", "LPC4AtW5l03"],
+    "paludisme_confirm_**_s1_paludisme_confirm-deces_12-59mois": ["kVj09UWaJLJ", "jGlFZ1m4k7d"],
+    "paludisme_confirm_**_s1_paludisme_confirm-deces_5-15ans": ["kVj09UWaJLJ", "aOSANPvwJSP"],
+    "paludisme_confirm_**_s1_paludisme_confirm-deces_>15ans": ["kVj09UWaJLJ", "Coa89kwZpQG"],
+}
