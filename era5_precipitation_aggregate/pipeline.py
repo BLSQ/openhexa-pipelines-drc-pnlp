@@ -24,7 +24,7 @@ from openhexa.toolbox.era5.aggregate import (
 from openhexa.toolbox.era5.cds import VARIABLES
 
 
-@pipeline("__pipeline_id__", name="ERA5_precipitation_aggregate")
+@pipeline("ERA5_precipitation_aggregate")
 @parameter(
     "input_dir",
     type=str,
@@ -56,7 +56,8 @@ def era5_aggregate(
         raise FileNotFoundError(msg)
 
     # load boundaries
-    boundaries = load_boundaries(db_table="cod_iaso_zone_de_sante")
+    # boundaries = load_boundaries(db_table="cod_iaso_zone_de_sante")
+    boundaries = read_boundaries(workspace.get_dataset("zones-de-sante-boundaries"), "zs_boundaries.gpkg")
 
     df_daily = aggregate_ERA5_data_daily(
         input_dir=input_dir,
@@ -84,7 +85,6 @@ def era5_aggregate(
     current_run.log_info("Precipitation data table updated")
 
 
-@era5_aggregate.task
 def load_boundaries(db_table: dict) -> gpd.GeoDataFrame:
     """Load boundaries from database."""
     current_run.log_info(f"Loading boundaries from {db_table}")
@@ -93,7 +93,6 @@ def load_boundaries(db_table: dict) -> gpd.GeoDataFrame:
     return boundaries
 
 
-@era5_aggregate.task
 def aggregate_ERA5_data_daily(
     input_dir: Path,
     boundaries: gpd.GeoDataFrame,
@@ -115,7 +114,6 @@ def aggregate_ERA5_data_daily(
     return df_daily
 
 
-@era5_aggregate.task
 def upload_data_to_table(df: pd.DataFrame, targetTable: str):
     """Upload the processed precipitation data stats to target table."""
 
@@ -130,7 +128,6 @@ def upload_data_to_table(df: pd.DataFrame, targetTable: str):
     del dbengine
 
 
-@era5_aggregate.task
 def update_precipitation_dataset(df: pd.DataFrame):
     """Update the precipitation dataset to be shared."""
 

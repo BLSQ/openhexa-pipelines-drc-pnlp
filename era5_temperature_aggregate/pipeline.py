@@ -26,7 +26,7 @@ from openhexa.toolbox.era5.cds import VARIABLES
 warnings.simplefilter(action="ignore", category=FutureWarning)
 
 
-@pipeline("__pipeline_id__", name="ERA5_temperature_aggregate")
+@pipeline("ERA5_temperature_aggregate")
 @parameter(
     "input_dir",
     type=str,
@@ -58,7 +58,8 @@ def era5_aggregate(
         raise FileNotFoundError(msg)
 
     # load boundaries
-    boundaries = load_boundaries(db_table="cod_iaso_zone_de_sante")
+    # boundaries = load_boundaries(db_table="cod_iaso_zone_de_sante")
+    boundaries = read_boundaries(workspace.get_dataset("zones-de-sante-boundaries"), "zs_boundaries.gpkg")
 
     calculate_aggregations(boundaries, input_dir, output_dir)
 
@@ -101,7 +102,6 @@ def calculate_aggregations(boundaries, input_dir, output_dir):
         current_run.log_info(f"{agg_func}-Temperature data table updated")
 
 
-@era5_aggregate.task
 def load_boundaries(db_table: dict) -> gpd.GeoDataFrame:
     """Load boundaries from database."""
     current_run.log_info(f"Loading boundaries from {db_table}")
