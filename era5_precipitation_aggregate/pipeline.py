@@ -58,6 +58,7 @@ def era5_aggregate(
     # load boundaries
     # boundaries = load_boundaries(db_table="cod_iaso_zone_de_sante")
     boundaries = read_boundaries(workspace.get_dataset("zones-de-sante-boundaries"), "zs_boundaries.gpkg")
+    # boundaries = gpd.read_file(Path(workspace.files_path) / "zs_boundaries.gpkg")  # local tests
 
     df_daily = aggregate_ERA5_data_daily(
         input_dir=input_dir,
@@ -67,12 +68,12 @@ def era5_aggregate(
 
     df_weekly = weekly(
         df=df_daily,
-        dst_file=Path(output_dir).joinpath("total_precipitation_weekly.parquet").as_posix(),
+        dst_file=(output_dir / "total_precipitation_weekly.parquet").as_posix(),
     )
 
     df_monthly = monthly(
         df=df_daily,
-        dst_file=Path(output_dir).joinpath("total_precipitation_monthly.parquet").as_posix(),
+        dst_file=(output_dir / "total_precipitation_monthly.parquet").as_posix(),
     )
 
     # upload to table
@@ -357,7 +358,6 @@ def filesystem(target_path: str, cache_dir: str = None) -> fsspec.AbstractFileSy
         return fsspec.filesystem(protocol=target_protocol, client_kwargs=client_kwargs)
 
 
-@era5_aggregate.task
 def weekly(df: pd.DataFrame, dst_file: str) -> pd.DataFrame:
     """Get weekly precipation from daily dataset."""
     df_weekly = get_weekly_aggregates(df)
@@ -370,7 +370,6 @@ def weekly(df: pd.DataFrame, dst_file: str) -> pd.DataFrame:
     return df_weekly
 
 
-@era5_aggregate.task
 def monthly(df: pd.DataFrame, dst_file: str) -> pd.DataFrame:
     """Get monthly precipation from daily dataset."""
     df_monthly = get_monthly_aggregates(df)
@@ -419,6 +418,11 @@ def get_weekly_aggregates(df: pd.DataFrame) -> pd.DataFrame:
     # merge
     merged_df = pd.merge(data_left, sums, on=["ref", "epi_year", "epi_week"], how="left")
     merged_df["mid_date"] = pd.to_datetime(merged_df["mid_date"])
+
+    # dummy columns to keep the format
+    merged_df["group_refs"] = None
+    merged_df["group_names"] = None
+    merged_df["uuid"] = None
 
     # fix format
     merged_df = merged_df[
@@ -478,6 +482,11 @@ def get_monthly_aggregates(df: pd.DataFrame) -> pd.DataFrame:
 
     # merge
     merged_df = pd.merge(data_left, sums, on=["ref", "year", "month"], how="left")
+
+    # dummy columns to keep the format
+    merged_df["group_refs"] = None
+    merged_df["group_names"] = None
+    merged_df["uuid"] = None
 
     # fix format
     merged_df = merged_df[

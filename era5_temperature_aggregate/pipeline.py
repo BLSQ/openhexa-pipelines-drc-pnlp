@@ -221,7 +221,14 @@ def read_boundaries(boundaries_dataset: Dataset, filename: str | None = None) ->
     if ds_file.filename.endswith(".parquet"):
         return gpd.read_parquet(BytesIO(ds_file.read()))
 
-    return gpd.read_file(BytesIO(ds_file.read()))
+    gpd_file = gpd.read_file(BytesIO(ds_file.read()))
+
+    # Format is important for PNLP dashboard
+    gpd_file["uuid"] = None
+    gpd_file["group_names"] = None
+    gpd_file["group_refs"] = None
+
+    return gpd_file
 
 
 def save_df(df, dst_file):
