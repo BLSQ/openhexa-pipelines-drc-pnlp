@@ -153,8 +153,6 @@ def update_precipitation_dataset(df: pd.DataFrame):
         current_run.log_error(f"Dataset file cannot be saved - ERROR: {e}")
         raise
 
-    current_run.log_info(f"New dataset version {date_version} created")
-
 
 def read_boundaries(boundaries_dataset: Dataset, filename: str | None = None) -> gpd.GeoDataFrame:
     """Read boundaries geographic file from input dataset.
