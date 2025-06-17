@@ -1,27 +1,29 @@
-from datetime import datetime
+import ast
+import json
 import logging
 import os
-import json
-from typing import Generator  # , List
-import pandas as pd
-import requests
-from sqlalchemy import create_engine
-from openhexa.sdk import current_run, pipeline, workspace
-from openhexa.toolbox.dhis2 import DHIS2
+from datetime import datetime
+from pathlib import Path
+from typing import Generator
 
 import geopandas as gpd
-import ast
+import pandas as pd
+import requests
+from openhexa.sdk import current_run, pipeline, workspace
+from openhexa.toolbox.dhis2 import DHIS2
 from shapely.geometry import mapping
+from sqlalchemy import create_engine
 
 
-@pipeline("dhis2-climate-push", name="dhis2_climate_push")
+@pipeline("dhis2_climate_push")
 def dhis2_climate_push():
     """
     This pipeline pushes climate data to DHIS2.
 
     """
     current_run.log_info("Starting climate pipeline...")
-    root_path = os.path.join(workspace.files_path, "pipelines", "dhis2_climate_push")
+    root_path = Path(workspace.files_path) / "pipelines" / "dhis2_climate_push"
+    configure_login(logs_path=root_path / "logs", task_name="climateData")
 
     try:
         # Load the pipeline configuration
@@ -30,66 +32,58 @@ def dhis2_climate_push():
         # connect to DHIS2
         dhis2_client = connect_to_dhis2_target(config=pipeline_config, cache_dir=None)
 
+        # TODO:
         # THIS PIPELINE SHOULD BE A SLAVE OF THE ERA5 PIPELINES EXECUTED FROM THERE
         # THE ERA5 PIPELINES WILL DOWNLOAD AND UPDATE THE SHAPES TABLE
         # THIS PIPELINE WILL MAKE THE ALIGNMENT USING THAT UPDATED TABLE
 
         # NOTE: we could implement a check at the begining to execute only when there is new data..
-
         # Align pyramid
-        pyramid_ready = push_organisation_units(
+        push_organisation_units(
             root=root_path,
             dhis2_client_target=dhis2_client,
             config=pipeline_config,
             run_task=True,
-            # success=pyramid_extract_ready,
         )
 
         # Run precipitation task
-        precip_success = precipitation_push(
+        precipitation_push(
             pipeline_path=root_path,
             dhis2_client_target=dhis2_client,
             config=pipeline_config,
-            success=pyramid_ready,
         )
 
         # Run temperature min task
-        temp_min_success = tempareture_min_push(
-            pipeline_path=root_path, dhis2_client_target=dhis2_client, config=pipeline_config, success=precip_success
-        )
+        tempareture_min_push(pipeline_path=root_path, dhis2_client_target=dhis2_client, config=pipeline_config)
 
         # Run temperature task
-        tempareture_max_push(
-            pipeline_path=root_path, dhis2_client_target=dhis2_client, config=pipeline_config, success=temp_min_success
-        )
+        tempareture_max_push(pipeline_path=root_path, dhis2_client_target=dhis2_client, config=pipeline_config)
+
+        # Run humidity task
+        relative_humidity_push(pipeline_path=root_path, dhis2_client_target=dhis2_client, config=pipeline_config)
 
     except Exception as e:
         current_run.log_error(f"An error occurred: {e}")
 
 
-@dhis2_climate_push.task
-def load_climate_config(pipeline_path: str) -> dict:
+def load_climate_config(pipeline_path: Path) -> dict:
     """Load the pipeline configuration."""
 
-    config_path = os.path.join(pipeline_path, "config", "pnlp_climate_push_config.json")
+    config_path = pipeline_path / "config" / "pnlp_climate_push_config.json"
     current_run.log_info(f"Loading pipeline configuration from {config_path}")
 
     try:
         with open(config_path, "r") as f:
             config = json.load(f)
         return config
-    except FileNotFoundError:
-        current_run.log_error("Configuration file not found.")
-        raise
-    except json.JSONDecodeError:
-        current_run.log_error("Configuration file is not a valid JSON file.")
-        raise
+    except FileNotFoundError as e:
+        raise FileNotFoundError(f"Configuration file not found {e}.") from e
+    except json.JSONDecodeError as e:
+        raise json.JSONDecodeError(f"Configuration file is not a valid JSON file {e}.") from e
     except Exception as e:
-        current_run.log_error(f"An error occurred while loading the configuration: {e}")
-        raise
+        raise Exception(f"An error occurred while loading the configuration: {e}") from e
 
 
-@dhis2_climate_push.task
 def connect_to_dhis2_target(config: dict, cache_dir: str):
     try:
         conn_id = config["CLIMATE_PUSH_SETTINGS"].get("DHIS2_CONNECTION_TARGET", None)
@@ -107,8 +101,7 @@ def connect_to_dhis2_target(config: dict, cache_dir: str):
         raise Exception(f"Error while connecting to DHIS2: {e}")
 
 
-@dhis2_climate_push.task
-def push_organisation_units(root: str, dhis2_client_target: DHIS2, config: dict, run_task: bool):
+def push_organisation_units(root: Path, dhis2_client_target: DHIS2, config: dict, run_task: bool):
     """
     This task handles creation and updates of organisation units in the target DHIS2 (incremental approach only).
 
@@ -121,8 +114,7 @@ def push_organisation_units(root: str, dhis2_client_target: DHIS2, config: dict,
         return True
 
     current_run.log_info("Starting organisation units push.")
-    report_path = os.path.join(root, "logs", "organisationUnits")
-    configure_login(logs_path=report_path, task_name="organisation_units")
+    report_path = root / "logs"
 
     # WE ALIGN ONLY THE ZONES DE SANTE USED FOR CLIMATE METRICS.
     # Load pyramid from boundaries DB table (cod_iaso_zone_de_sante)
@@ -208,13 +200,11 @@ def safe_eval(val):
         return None
 
 
-@dhis2_climate_push.task
-def precipitation_push(pipeline_path: str, dhis2_client_target: DHIS2, config: dict, success: bool) -> bool:
+def precipitation_push(pipeline_path: Path, dhis2_client_target: DHIS2, config: dict) -> bool:
     """Put some data processing code here."""
 
     current_run.log_info("Precipitation data push started...")
-    report_path = os.path.join(pipeline_path, "logs", "precipitation")
-    configure_login(logs_path=report_path, task_name="precipitation")
+    report_path = pipeline_path / "logs"
 
     # Parameters for the import
     import_strategy = config["CLIMATE_PUSH_SETTINGS"].get("IMPORT_STRATEGY", None)
@@ -231,16 +221,13 @@ def precipitation_push(pipeline_path: str, dhis2_client_target: DHIS2, config: d
 
     # Get last date pushed for precipitation
     try:
-        last_pushed_date = get_last_pushed_date(os.path.join(pipeline_path, "config"), "precipitation")
-    except FileNotFoundError as e:
-        current_run.log_warning(f"An error occurred while getting the last date for precipitation: {e}")
-        last_pushed_date = "2017-01-01"  # Default
-    except KeyError as e:
-        current_run.log_warning(f"The precipitation date was not found: {e}")
-        last_pushed_date = "2017-01-01"  # Default
+        last_pushed_date = get_last_pushed_date(pipeline_path / "config", "precipitation")
+        if last_pushed_date is None:
+            current_run.log_warning("The last precipitation date was not set. Falling back to default : 2017-01-01")
+            last_pushed_date = "2017-01-01"
     except Exception as e:
-        current_run.log_error(f"An error occurred while checking the last date for precipitation: {e}")
-        raise
+        current_run.log_warning(f"The last precipitation date was not found: {e}. Falling back to default : 2017-01-01")
+        last_pushed_date = "2017-01-01"  # Default
 
     try:
         # Load precipitation data from DB table
@@ -317,22 +304,19 @@ def precipitation_push(pipeline_path: str, dhis2_client_target: DHIS2, config: d
             current_run.log_info(f"{total_dp} datapoints correctly processed.")
             # current_run.log_info(f"All {len(datapoints_valid)} datapoints correctly imported.")
             # Save the last date pushed for precipitation
-            update_last_available_date_log(os.path.join(pipeline_path, "config"), "precipitation", precip_date_max)
+            update_last_available_date_log(pipeline_path / "config", "precipitation", precip_date_max)
 
         return True
 
     except Exception as e:
-        current_run.log_error(f"An error occurred while pushing precipitation data: {e}")
-        raise
+        raise Exception(f"An error occurred while pushing precipitation data: {e}") from e
 
 
-@dhis2_climate_push.task
-def tempareture_min_push(pipeline_path: str, dhis2_client_target: DHIS2, config: dict, success: bool) -> bool:
+def tempareture_min_push(pipeline_path: Path, dhis2_client_target: DHIS2, config: dict) -> bool:
     """Put some data processing code here."""
 
     current_run.log_info("Temperature min data push started...")
-    report_path = os.path.join(pipeline_path, "logs", "temperature_min")
-    configure_login(logs_path=report_path, task_name="temperature_min")
+    report_path = pipeline_path / "logs"
 
     # Parameters for the import
     import_strategy = config["CLIMATE_PUSH_SETTINGS"].get("IMPORT_STRATEGY", None)
@@ -349,16 +333,15 @@ def tempareture_min_push(pipeline_path: str, dhis2_client_target: DHIS2, config:
 
     # Get last date pushed for Temperature
     try:
-        last_pushed_date = get_last_pushed_date(os.path.join(pipeline_path, "config"), "temperature_min")
-    except FileNotFoundError as e:
-        current_run.log_warning(f"An error occurred while getting the last date for temperature_min : {e}")
-        last_pushed_date = "2017-01-01"  # Default
-    except KeyError as e:
-        current_run.log_warning(f"The temperature_min date was not found: {e}")
-        last_pushed_date = "2017-01-01"  # Default
+        last_pushed_date = get_last_pushed_date(pipeline_path / "config", "temperature_min")
+        if last_pushed_date is None:
+            current_run.log_warning("The last temperature_min date was not set. Falling back to default : 2017-01-01")
+            last_pushed_date = "2017-01-01"
     except Exception as e:
-        current_run.log_error(f"An error occurred while checking the last date for temperature_min : {e}")
-        raise
+        current_run.log_warning(
+            f"The last temperature_min date was not found: {e}. Falling back to default : 2017-01-01"
+        )
+        last_pushed_date = "2017-01-01"  # Default
 
     try:
         # Load Temperature data from DB table
@@ -449,13 +432,12 @@ def tempareture_min_push(pipeline_path: str, dhis2_client_target: DHIS2, config:
             current_run.log_info(f"{total_dp} datapoints correctly processed.")
             # current_run.log_info(f"All {len(datapoints_valid)} datapoints correctly imported.")
             # Save the last date pushed for Temperature min
-            update_last_available_date_log(os.path.join(pipeline_path, "config"), "temperature_min", temp_min_date_max)
+            update_last_available_date_log(pipeline_path / "config", "temperature_min", temp_min_date_max)
 
         return True
 
     except Exception as e:
-        current_run.log_error(f"An error occurred while pushing temperature min data: {e}")
-        raise
+        raise Exception(f"An error occurred while pushing temperature min data: {e}") from e
 
 
 # Helper class definition to store/create the correct OU JSON format for creation/update
@@ -517,7 +499,7 @@ class OrgUnitObj:
         return f"OrgUnitObj({self.id}, {self.name})"
 
 
-def push_orgunits_create(ou_df: pd.DataFrame, dhis2_client_target: DHIS2, report_path: str):
+def push_orgunits_create(ou_df: pd.DataFrame, dhis2_client_target: DHIS2, report_path: Path):
     errors_count = 0
     for _, row in ou_df.iterrows():
         ou = OrgUnitObj(row)
@@ -662,13 +644,11 @@ def build_id_indexes(ou_source, ou_target, ou_matching_ids):
     return index_dict
 
 
-@dhis2_climate_push.task
-def tempareture_max_push(pipeline_path: str, dhis2_client_target: DHIS2, config: dict, success: bool) -> bool:
+def tempareture_max_push(pipeline_path: Path, dhis2_client_target: DHIS2, config: dict) -> bool:
     """Put some data processing code here."""
 
     current_run.log_info("Temperature max data push started...")
-    report_path = os.path.join(pipeline_path, "logs", "temperature_max")
-    configure_login(logs_path=report_path, task_name="temperature_max")
+    report_path = pipeline_path / "logs"
 
     # Parameters for the import
     import_strategy = config["CLIMATE_PUSH_SETTINGS"].get("IMPORT_STRATEGY", None)
@@ -685,16 +665,15 @@ def tempareture_max_push(pipeline_path: str, dhis2_client_target: DHIS2, config:
 
     # Get last date pushed for Temperature max
     try:
-        last_pushed_date = get_last_pushed_date(os.path.join(pipeline_path, "config"), "temperature_max")
-    except FileNotFoundError as e:
-        current_run.log_warning(f"An error occurred while getting the last date for temperature_max: {e}")
-        last_pushed_date = "2017-01-01"  # Default
-    except KeyError as e:
-        current_run.log_warning(f"The temperature_max date was not found: {e}")
-        last_pushed_date = "2017-01-01"  # Default
+        last_pushed_date = get_last_pushed_date(pipeline_path / "config", "temperature_max")
+        if last_pushed_date is None:
+            current_run.log_warning("The last temperature_max date was not set. Falling back to default : 2017-01-01")
+            last_pushed_date = "2017-01-01"
     except Exception as e:
-        current_run.log_error(f"An error occurred while checking the last date for temperature max: {e}")
-        raise
+        current_run.log_warning(
+            f"The last temperature_max date was not found: {e}. Falling back to default : 2017-01-01"
+        )
+        last_pushed_date = "2017-01-01"  # Default
 
     try:
         # Load temperature max data from DB table
@@ -789,8 +768,132 @@ def tempareture_max_push(pipeline_path: str, dhis2_client_target: DHIS2, config:
         return True
 
     except Exception as e:
-        current_run.log_error(f"An error occurred while pushing temperature max data: {e}")
-        raise
+        raise Exception(f"An error occurred while pushing temperature max data: {e}") from e
+
+
+def relative_humidity_push(pipeline_path: Path, dhis2_client_target: DHIS2, config: dict) -> bool:
+    """Put some data processing code here."""
+
+    current_run.log_info("Relative humidity data push started...")
+    report_path = pipeline_path / "logs"
+
+    # Parameters for the import
+    import_strategy = config["CLIMATE_PUSH_SETTINGS"].get("IMPORT_STRATEGY", None)
+    if import_strategy is None:
+        import_strategy = "CREATE_AND_UPDATE"  # CREATE, UPDATE, CREATE_AND_UPDATE
+
+    dry_run = config["CLIMATE_PUSH_SETTINGS"].get("DRY_RUN", None)
+    if dry_run is None:
+        dry_run = True  # True or False
+
+    max_post = config["CLIMATE_PUSH_SETTINGS"].get("MAX_POST", None)
+    if max_post is None:
+        max_post = 500  # number of datapoints without a time-out limit (?)
+
+    # Get last date pushed for Temperature max
+    try:
+        last_pushed_date = get_last_pushed_date(json_folder=pipeline_path / "config", node="relative_humidity")
+        if last_pushed_date is None:
+            current_run.log_warning("The last relative_humidity date was not set. Falling back to default : 2017-01-01")
+            last_pushed_date = "2017-01-01"
+    except Exception as e:
+        current_run.log_warning(
+            f"The last relative_humidity date was not found: {e}. Falling back to default : 2017-01-01"
+        )
+        last_pushed_date = "2017-01-01"  # Default
+
+    try:
+        # Load temperature max data from DB table
+        table_name = config["CLIMATE_PUSH_SETTINGS"].get("RELATIVE_HUMIDITY_TABLE")
+        if table_name is None:
+            current_run.log_error("Relative humidity table name is not provided.")
+            raise ValueError
+
+        current_run.log_info(f"Loading relative humidity data from database table: {table_name}")
+        relative_humidity_data = load_climate_data(table_name=table_name)
+
+        # Check for new data.
+        relative_humidity_date_max = relative_humidity_data.period.max()
+        current_run.log_info(
+            f"Last relative humidity pushed date {last_pushed_date} - data available to : {relative_humidity_date_max}"
+        )
+        if relative_humidity_date_max <= last_pushed_date:
+            current_run.log_info("No new relative humidity data to push.")
+            return True  # No new data to push EXIT!
+
+        # Select new data using temp_max_date_max
+        current_run.log_info(f"Pushing new relative humidity date from : {last_pushed_date}")
+        relative_humidity_data = relative_humidity_data[relative_humidity_data.period >= last_pushed_date]
+
+        # get uids list
+        uids = config["RELATIVE_HUMIDITY_MAPPING"].get("UIDS", [])
+        if len(uids) == 0:
+            current_run.log_error("Relative humidity UIDs are not provided.")
+            raise ValueError
+
+        # map uids to DHIS2 format
+        dx_uid_min = uids.get("HUMIDITY_MIN", None)
+        dx_uid_max = uids.get("HUMIDITY_MAX", None)
+        dx_uid_mean = uids.get("HUMIDITY_MEAN", None)
+        if dx_uid_min is None or dx_uid_max is None or dx_uid_mean is None:
+            current_run.log_error("Relative humidity, min, max and mean UIDs are not provided.")
+            raise ValueError
+
+        # format the climate data to DHIS2 format
+        relative_humidity_data_formatted = to_dhis2_format_humidity(
+            climate_data=relative_humidity_data,
+            dx_uid_min=dx_uid_min,
+            dx_uid_max=dx_uid_max,
+            dx_uid_mean=dx_uid_mean,
+            data_type="RELATIVE_HUMIDITY",
+            report_path=report_path,
+        )
+
+        # Apply mappings (if any..)
+        relative_humidity_data_formatted = apply_mappings_for_climate_data(
+            relative_humidity_data_formatted, config["RELATIVE_HUMIDITY_MAPPING"]
+        )
+        datapoints_valid, datapoints_not_valid, datapoints_na = select_transform_to_json(
+            data_values=relative_humidity_data_formatted
+        )
+
+        # log not valid datapoints
+        log_ignored(report_path=report_path, datapoint_list=datapoints_not_valid, data_type="RELATIVE_HUMIDITY")
+        log_ignored(report_path=report_path, datapoint_list=datapoints_na, data_type="RELATIVE_HUMIDITY", is_na=True)
+
+        # push data
+        current_run.log_info(
+            f"Pushing relative humidity data with parameters import_strategy: {import_strategy}, dry_run: {dry_run}, max_post: {max_post}"
+        )
+        summary = push_data_elements(
+            dhis2_client=dhis2_client_target,
+            data_elements_list=datapoints_valid,
+            strategy=import_strategy,
+            dry_run=dry_run,
+            max_post=max_post,
+        )
+
+        # log info
+        msg = f"Relative humidity export summary: {summary['import_counts']}"
+        current_run.log_info(msg)
+        logging.info(msg)
+        log_summary_errors(summary)
+
+        # Check if all data points were correctly imported by DHIS2
+        dp_ignored = summary["import_counts"]["ignored"]
+        if dp_ignored > 0:
+            current_run.log_warning(
+                f"{dp_ignored} datapoints not imported. relative_humity last push date is not updated: {last_pushed_date}"
+            )
+        else:
+            # Save the last date pushed for Temperature max
+            total_dp = summary["import_counts"]["imported"] + summary["import_counts"]["updated"]
+            current_run.log_info(f"{total_dp} datapoints correctly processed.")
+            # current_run.log_info(f"All {len(datapoints_valid)} datapoints correctly imported.")
+            update_last_available_date_log(pipeline_path / "config", "relative_humidity", relative_humidity_date_max)
+
+    except Exception as e:
+        raise Exception(f"An error occurred while pushing relative humidity max data: {e}") from e
 
 
 def load_climate_data(table_name: str) -> pd.DataFrame:
@@ -801,11 +904,13 @@ def load_climate_data(table_name: str) -> pd.DataFrame:
     return data
 
 
-def configure_login(logs_path: str, task_name: str):
+def configure_login(logs_path: Path, task_name: str):
+    logs_path.mkdir(parents=True, exist_ok=True)
+
     # Configure logging
     now = datetime.now().strftime("%Y-%m-%d-%H_%M")
     logging.basicConfig(
-        filename=os.path.join(logs_path, f"{task_name}_{now}.log"),
+        filename=logs_path / f"{task_name}_{now}.log",
         level=logging.INFO,
         format="%(asctime)s - %(message)s",
     )
@@ -888,7 +993,7 @@ def to_dhis2_format_precipitation(
                     f"UID: {row['dx_uid']} period: {row['period']} ou: {row['org_unit']} value: {row['value']}"
                 )
 
-        # Set the absolute values under 0.0001 to 0.0001
+        # Set the absolute values under 0.0001 to 0.0001 (rounding up)
         dhis2_format["value"] = dhis2_format["value"].apply(
             lambda x: 0.0001 if pd.notna(x) and abs(x) < 0.0001 and x != 0 else x
         )
@@ -1009,6 +1114,104 @@ def to_dhis2_format_temperature(
         raise Exception(f"Unexpected Error while creating routine format table: {e}")
 
 
+def to_dhis2_format_humidity(
+    climate_data: pd.DataFrame,
+    dx_uid_min: str,
+    dx_uid_max: str,
+    dx_uid_mean: str,
+    data_type: str = "RELATIVE_HUMIDITY",
+    coc_default: str = "HllvX50cXC0",
+    aoc_default: str = "HllvX50cXC0",
+    domain_type: str = "AGGREGATED",
+    report_path: str = "",
+) -> pd.DataFrame:
+    """
+    Maps Climate data to a standardized DHIS2 data table.
+
+    Parameters
+    ----------
+    climate_data : pd.DataFrame
+        Input DataFrame containing climate data from ERA5.
+    data_type : str
+        The type of data being mapped. Supported value : RELATIVE_HUMIDITY
+    domain_type : str, optional
+        The domain of the data if its per period (Agg ex: monthly) or datapoint (Tracker ex: per day):
+        - "AGGREGATED": For aggregated data (default).
+        - "TRACKER": For tracker data.
+
+    Returns
+    -------
+    pd.DataFrame
+        A DataFrame formatted to DHIS2 with the following columns:
+        - "data_type": The type of data (PRECIPITATION, TEMPERATURE_MAX, TEMPERATURE_MIN).
+        - "dx_uid": UID.
+        - "period": Reporting period.
+        - "orgUnit": Organization unit.
+        - "categoryOptionCombo": Category option combo UID.
+        - "rate_type": Rate type.
+        - "domain_type": Data domain (AGGREGATED or TRACKER).
+        - "value": Data value.
+    """
+    if climate_data.empty:
+        return None
+
+    uids = {"min": dx_uid_min, "max": dx_uid_max, "mean": dx_uid_mean}
+    if all([uid is None and pd.isna(uid) for uid in uids.values()]):
+        raise ValueError(f"Incorrect 'dx_uid_*' provided for {data_type}: {uids}")
+
+    try:
+        humidity_table = []
+        for key, value in uids.items():
+            dhis2_format_sub = pd.DataFrame(index=climate_data.index)
+            dhis2_format_sub["data_type"] = data_type
+            dhis2_format_sub["dx_uid"] = value
+            dhis2_format_sub["period"] = climate_data["period"]
+            dhis2_format_sub["org_unit"] = climate_data["ref"]
+            dhis2_format_sub["category_option_combo"] = coc_default
+            dhis2_format_sub["attribute_option_combo"] = aoc_default
+            dhis2_format_sub["rate_type"] = None
+            dhis2_format_sub["domain_type"] = domain_type
+            dhis2_format_sub["value"] = climate_data[key]
+            humidity_table.append(dhis2_format_sub)
+
+        dhis2_format = pd.concat(humidity_table, ignore_index=True)
+        # Ensure all values in the column are numeric
+        dhis2_format["value"] = pd.to_numeric(dhis2_format["value"], errors="coerce")
+
+        # Apply the condition safely
+        rows_to_change = dhis2_format[
+            (dhis2_format["value"].notna())  # Ensure the value is not NaN
+            & (abs(dhis2_format["value"]) < 0.0001)  # Value's absolute is less than 0.0001
+            & (dhis2_format["value"] != 0)  # Value is not 0
+        ]
+
+        # Log the rows to be changed
+        if not rows_to_change.empty:
+            current_run.log_warning(
+                f"{len(rows_to_change)} data points in {data_type} will have their 'value' replaced to 0.0001. Please check the report for details {report_path}"
+            )
+            for _, row in rows_to_change.iterrows():
+                # current_run.log_info(
+                # f'UID: {row["dx_uid"]} period: {row["period"]} ou: {row["org_unit"]} value: {row["value"]}')
+                logging.info(
+                    f"UID: {row['dx_uid']} period: {row['period']} ou: {row['org_unit']} value: {row['value']}"
+                )
+
+            # Set the absolute values under 0.0001 to 0.0001
+            dhis2_format["value"] = dhis2_format["value"].apply(
+                lambda x: 0.0001 if pd.notna(x) and abs(x) < 0.0001 and x != 0 else x
+            )
+
+        # sorting might improve speed
+        dhis2_format = dhis2_format.sort_values(by=["org_unit", "period"], ascending=True)
+        return dhis2_format
+
+    except AttributeError as e:
+        raise AttributeError(f"Climate data is missing a required attribute: {e}")
+    except Exception as e:
+        raise Exception(f"Unexpected Error while creating routine format table: {e}")
+
+
 def apply_mappings_for_climate_data(datapoints_df: pd.DataFrame, mappings: dict) -> pd.DataFrame:
     """
     All matching ids will be replaced.
@@ -1064,7 +1267,7 @@ def push_data_elements(
     strategy: str = "CREATE_AND_UPDATE",
     dry_run: bool = True,
     max_post: int = 1000,
-):
+) -> dict:
     """
     dry_run: This parameter can be set to true to get an import summary without actually importing data (DHIS2).
     """
@@ -1253,7 +1456,7 @@ class ClimateDataPoint:
         return f"DataPoint({self.dataType} id:{self.dataElement} pe:{self.period} ou:{self.orgUnit} value:{self.value})"
 
 
-def get_last_pushed_date(json_folder: str, node: str, json_name: str = "last_pushed_date.json") -> str:
+def get_last_pushed_date(json_folder: Path, node: str, json_name: str = "last_pushed_date.json") -> str:
     """
     Reads the value of a specific node from a JSON file.
 
@@ -1269,8 +1472,8 @@ def get_last_pushed_date(json_folder: str, node: str, json_name: str = "last_pus
     - KeyError: If the node is not found in the file.
     """
     # Check if the file exists
-    file_path = os.path.join(json_folder, json_name)
-    if not os.path.exists(file_path):
+    file_path = json_folder / json_name
+    if not file_path.exists():
         raise FileNotFoundError(f"The file {file_path} does not exist.")
 
     # Load the JSON file
@@ -1281,13 +1484,16 @@ def get_last_pushed_date(json_folder: str, node: str, json_name: str = "last_pus
     if node not in data:
         raise KeyError(f"The node '{node}' does not exist in the JSON file.")
 
-    # Return the node's value
-    return data[node]
+    value = data.get(node)
+    if not value:
+        value = None
+
+    return value
 
 
 def update_last_available_date_log(
     json_folder: str, node: str, iso_date: str, json_name: str = "last_pushed_date.json"
-):
+) -> None:
     """
     Updates the last available date for a given data source in a JSON file.
 
