@@ -1,28 +1,23 @@
+import json
 import os
+from datetime import datetime
+from itertools import product
+
 import pandas as pd
 import polars as pl
-import json
-from datetime import datetime
 from dateutil.relativedelta import relativedelta
-from itertools import product
-# from typing import List
-# from types import MethodType
-
+from openhexa.sdk import current_run, parameter, pipeline, workspace
+from openhexa.toolbox.dhis2 import DHIS2
 from utils import (
+    Queue,
+    first_day_of_future_month,
     get_periods_yyyymm,
     merge_dataframes,
     save_to_parquet,
-    first_day_of_future_month,
-    Queue,
 )
 
-from openhexa.sdk import current_run, pipeline, workspace, parameter
-from openhexa.toolbox.dhis2 import DHIS2
 
-from openhexa.toolbox.dhis2.api import DHIS2Error
-
-
-@pipeline("dhis2-snis-extract", name="dhis2_snis_extract")
+@pipeline("dhis2-snis-extract")
 @parameter(
     "extract_orgunits",
     name="Extract Organisation Units",
@@ -219,8 +214,6 @@ def extract_snis_data(pipeline_path: str, config: dict, dhis2_snis_client: DHIS2
     if not run_pipeline:
         return True
 
-    # NOTE: We add this function to the class to remind me to update the library!
-    # dhis2_snis_client.data_value_sets.snis_get = MethodType(snis_get, dhis2_snis_client.data_value_sets)
     try:
         # Set start and end periods ---> with a window of 6 months we are safe: 6 months DEFAULT
         months_lag = config["EXTRACT_SETTINGS"].get("NUMBER_MONTHS_WINDOW", 6)  # default 6 months window
@@ -315,9 +308,11 @@ def handle_extract_for_period(dhis2_client: DHIS2, period: str, org_unit_list: l
     # initialize update queue
     push_queue = Queue(queue_db_path)
 
-    # limits
-    dhis2_client.analytics.MAX_DX = 10
-    dhis2_client.analytics.MAX_OU = 10
+    # limits TEST
+    dhis2_client.analytics.MAX_DX = 100
+    dhis2_client.analytics.MAX_ORG_UNITS = 100
+    dhis2_client.data_value_sets.MAX_DATA_ELEMENTS = 100
+    dhis2_client.data_value_sets.MAX_ORG_UNITS = 100
 
     download_settings = config["EXTRACT_SETTINGS"].get("MODE", None)
     if download_settings is None:
@@ -423,12 +418,6 @@ def retrieve_snis_routine_extract(
     routine_ids: list,
     lastUpdated=None,
 ):
-    # response = dhis2_snis_client.data_value_sets.snis_get(
-    #     data_elements=routine_ids,
-    #     periods=[period],
-    #     org_units=org_unit_list,
-    #     last_updated=lastUpdated,
-    # )
     response = dhis2_snis_client.data_value_sets.get(
         data_elements=routine_ids,
         periods=[period],
@@ -439,8 +428,13 @@ def retrieve_snis_routine_extract(
 
 
 def retrieve_snis_rates_extract(dhis2_snis_client: DHIS2, period: str, org_unit_list: list, rate_ids: dict):
-    reporting_datasets = rate_ids["REPORTING_DATASETS"]
-    reporting_des = [f"{ds}.{metric}" for ds, metric in product(reporting_datasets, rate_ids["METRICS"])]
+    reporting_des = []
+    for rates in rate_ids:
+        reporting_datasets = rates.get("DATASETS")
+        reporting_metrics = rates.get("METRICS")
+        reporting_combinations = [f"{ds}.{metric}" for ds, metric in product(reporting_datasets, reporting_metrics)]
+        reporting_des.extend(reporting_combinations)
+
     try:
         response = dhis2_snis_client.analytics.get(
             data_elements=reporting_des,
@@ -448,7 +442,7 @@ def retrieve_snis_rates_extract(dhis2_snis_client: DHIS2, period: str, org_unit_
             org_units=org_unit_list,
             include_cocs=False,
         )
-    except DHIS2Error as e:
+    except Exception as e:
         current_run.log_error(f"Error while retrieving rates data: {e}")
 
     raw_data_formatted = pd.DataFrame(response).rename(columns={"pe": "period", "ou": "orgUnit"})
@@ -463,7 +457,7 @@ def retrieve_snis_acm_extract(dhis2_snis_client: DHIS2, period: str, org_unit_li
             org_units=org_unit_list,
             include_cocs=False,
         )
-    except DHIS2Error as e:
+    except Exception as e:
         current_run.log_error(f"Error while retrieving ACM data: {e}")
         raise
 
@@ -582,9 +576,7 @@ def update_snis_extract(new_data_df: pd.DataFrame, target_df: pd.DataFrame) -> p
         how="outer",
         suffixes=("_old", ""),
     )
-
-    # If there's a new value in update_df, replace the old value
-    updated_df["value"] = updated_df["value"].fillna(updated_df["value_old"])
+    # remove the old values column
     updated_df = updated_df.drop(columns=["value_old"])
 
     return updated_df
