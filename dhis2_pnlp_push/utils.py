@@ -109,7 +109,6 @@ def save_to_parquet(data: pd.DataFrame, filename: str):
 
 
 def read_parquet_extract(parquet_file: str) -> pd.DataFrame:
-    ou_source = pd.DataFrame()
     try:
         ou_source = pd.read_parquet(parquet_file)
     except FileNotFoundError:

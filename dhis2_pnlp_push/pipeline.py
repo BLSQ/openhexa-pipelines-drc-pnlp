@@ -1,22 +1,20 @@
-import os
-import pandas as pd
 import json
-from datetime import datetime
-import requests
 import logging
+import os
+from datetime import datetime
 
-
+import pandas as pd
+import requests
+from openhexa.sdk import current_run, parameter, pipeline, workspace
+from openhexa.toolbox.dhis2 import DHIS2
 from utils import (
     Queue,
     read_parquet_extract,
     split_list,
 )
 
-from openhexa.sdk import current_run, pipeline, workspace, parameter
-from openhexa.toolbox.dhis2 import DHIS2
 
-
-@pipeline("dhis2-pnlp-push", name="dhis2_pnlp_push", timeout=28800)
+@pipeline("dhis2-pnlp-push", timeout=28800)
 @parameter(
     "push_orgunits",
     name="Export Organisation Units",
@@ -47,7 +45,6 @@ def dhis2_pnlp_push(push_orgunits: bool, push_pop: bool, push_analytics: bool):
     Most of the tasks and functions are specific to this project.
 
     """
-
     # set paths
     PIPELINE_ROOT = os.path.join(f"{workspace.files_path}", "pipelines", "dhis2_pnlp_push")
     EXTRACT_PIPELINE_ROOT = os.path.join(f"{workspace.files_path}", "pipelines", "dhis2_snis_extract")
@@ -63,6 +60,7 @@ def dhis2_pnlp_push(push_orgunits: bool, push_pop: bool, push_analytics: bool):
             root=PIPELINE_ROOT,
             extract_pipeline_path=EXTRACT_PIPELINE_ROOT,
             dhis2_client_target=dhis2_client,
+            config=config,
             run_task=push_orgunits,
         )
 
@@ -126,7 +124,9 @@ def connect_to_dhis2(config: dict, cache_dir: str):
 
 
 @dhis2_pnlp_push.task
-def push_organisation_units(root: str, extract_pipeline_path: str, dhis2_client_target: DHIS2, run_task: bool):
+def push_organisation_units(
+    root: str, extract_pipeline_path: str, dhis2_client_target: DHIS2, config: dict, run_task: bool
+):
     """
     This task handles creation and updates of organisation units in the target DHIS2 (incremental approach only).
 
@@ -145,15 +145,18 @@ def push_organisation_units(root: str, extract_pipeline_path: str, dhis2_client_
     # Load pyramid extract
     ou_parquet = os.path.join(extract_pipeline_path, "data", "raw", "pyramid", "snis_pyramid.parquet")
     orgUnit_source = read_parquet_extract(ou_parquet)
+    current_run.log_debug(f"Shape source pyramid: {orgUnit_source.shape}")
 
     if orgUnit_source.shape[0] > 0:
         # Retrieve the target (PNLP) orgUnits to compare
         current_run.log_info(f"Retrieving organisation units from target DHIS2 instance {dhis2_client_target.api.url}")
-        # orgUnit_target = dhis2_client_target.meta.organisation_units_extra_fields()
+        dry_run = config["PUSH_SETTINGS"].get("DRY_RUN", True)
+        current_run.log_info(f"Run org units sync with dry_run: {dry_run}")
         orgUnit_target = dhis2_client_target.meta.organisation_units(
             fields="id,name,shortName,openingDate,closedDate,parent,level,path,geometry"
         )
         orgUnit_target = pd.DataFrame(orgUnit_target)
+        current_run.log_debug(f"Shape target pyramid: {orgUnit_target.shape}")
 
         # Get list of ids for creation and update
         ou_new = list(set(orgUnit_source.id) - set(orgUnit_target.id))
@@ -172,6 +175,7 @@ def push_organisation_units(root: str, extract_pipeline_path: str, dhis2_client_
                 push_orgunits_create(
                     ou_df=ou_to_create,
                     dhis2_client_target=dhis2_client_target,
+                    dry_run=dry_run,
                     report_path=report_path,
                 )
         except Exception as e:
@@ -191,6 +195,7 @@ def push_organisation_units(root: str, extract_pipeline_path: str, dhis2_client_
                     orgUnit_target=orgUnit_target,
                     matching_ou_ids=ou_matching,
                     dhis2_client_target=dhis2_client_target,
+                    dry_run=dry_run,
                     report_path=report_path,
                 )
                 current_run.log_info("Organisation units push finished.")
@@ -221,9 +226,7 @@ def push_population(
     if import_strategy is None:
         import_strategy = "CREATE_AND_UPDATE"  # CREATE, UPDATE, CREATE_AND_UPDATE
 
-    dry_run = config["PUSH_SETTINGS"].get("DRY_RUN", None)
-    if dry_run is None:
-        dry_run = True  # True or False
+    dry_run = config["PUSH_SETTINGS"].get("DRY_RUN", True)
 
     max_post = config["PUSH_SETTINGS"].get("MAX_POST", None)
     if max_post is None:
@@ -252,6 +255,12 @@ def push_population(
         pop_source = read_parquet_extract(pop_fname)
 
         if pop_source.shape[0] > 0:
+            # Sort the dataframe by org_unit to reduce the time (hopefully)
+            df = pop_source.sort_values(by=["org_unit"], ascending=True)
+
+            # Use dictionary mappings to replace UIDS, OrgUnits, COC and AOC..
+            df = apply_population_mappings(datapoints_df=df, mappings=pop_mappings)
+
             # mandatory fields in the input dataset (pop_source)
             mandatory_fields = [
                 "dx_uid",
@@ -261,13 +270,7 @@ def push_population(
                 "attribute_option_combo",
                 "value",
             ]
-            df = pop_source[mandatory_fields].copy()
-
-            # Sort the dataframe by org_unit to reduce the time (hopefully)
-            df = df.sort_values(by=["org_unit"], ascending=True)
-
-            # Use dictionary mappings to replace UIDS, OrgUnits, COC and AOC..
-            df = apply_dataelement_mappings(datapoints_df=df, mappings=pop_mappings)
+            df = df[mandatory_fields].copy()
 
             # convert the datapoints to json and check if thei are valid
             # check the implementation of DataPoint class for the valid fields (mandatory)
@@ -341,9 +344,7 @@ def push_extracts(
     if import_strategy is None:
         import_strategy = "CREATE_AND_UPDATE"  # CREATE, UPDATE, CREATE_AND_UPDATE
 
-    dry_run = config["PUSH_SETTINGS"].get("DRY_RUN", None)
-    if dry_run is None:
-        dry_run = True  # True or False
+    dry_run = config["PUSH_SETTINGS"].get("DRY_RUN", True)
 
     max_post = config["PUSH_SETTINGS"].get("MAX_POST", None)
     if max_post is None:
@@ -391,8 +392,13 @@ def push_extracts(
                 continue
 
             # NOTE: FILTER -> DO NOT PUSH THESE RATES, NOT USED!
+            uids_to_filter = ["pMbC0FJPkcm", "maDtHIFrSHx", "OeWrFwkFMvf"]
+            rate_types_to_remove = ["ACTUAL_REPORTS", "EXPECTED_REPORTS", "ACTUAL_REPORTS_ON_TIME"]
             df = extract_data[
-                ~(extract_data.rate_type.isin(["ACTUAL_REPORTS", "EXPECTED_REPORTS", "ACTUAL_REPORTS_ON_TIME"]))
+                ~(
+                    (extract_data["dx_uid"].isin(uids_to_filter))
+                    & (extract_data["rate_type"].isin(rate_types_to_remove))
+                )
             ].copy()
 
             # Use dictionary mappings to replace UIDS, OrgUnits, COC and AOC..
@@ -400,7 +406,7 @@ def push_extracts(
             df = apply_rate_mappings(datapoints_df=df, mappings=rate_mappings)
             df = apply_acm_mappings(datapoints_df=df, mappings=acm_mappings)
 
-            # Set values of 'INDICATOR' to INT. Otherwise is ignored by DHIS2
+            # Set values of 'INDICATOR' to INT format (no decimal), otherwise is ignored by DHIS2
             df.loc[df.data_type == "INDICATOR", "value"] = df.loc[df.data_type == "INDICATOR", "value"].apply(
                 lambda x: str(int(float(x)))
             )
@@ -642,7 +648,7 @@ class DataPoint:
         return f"DataPoint({self.dataType} id:{self.dataElement} pe:{self.period} ou:{self.orgUnit} value:{self.value})"
 
 
-def push_orgunits_create(ou_df: pd.DataFrame, dhis2_client_target: DHIS2, report_path: str):
+def push_orgunits_create(ou_df: pd.DataFrame, dhis2_client_target: DHIS2, dry_run: bool, report_path: str):
     errors_count = 0
     for _, row in ou_df.iterrows():
         ou = OrgUnitObj(row)
@@ -651,7 +657,7 @@ def push_orgunits_create(ou_df: pd.DataFrame, dhis2_client_target: DHIS2, report
                 dhis2_client=dhis2_client_target,
                 orgunit=ou,
                 strategy="CREATE",
-                dry_run=False,  # dry_run=False -> Apply changes in the DHIS2
+                dry_run=dry_run,  # dry_run=False -> Apply changes in the DHIS2
             )
             if response["status"] == "ERROR":
                 errors_count = errors_count + 1
@@ -682,6 +688,7 @@ def push_orgunits_update(
     orgUnit_target: pd.DataFrame,
     matching_ou_ids: list,
     dhis2_client_target: DHIS2,
+    dry_run: bool,
     report_path: str,
 ):
     """
@@ -722,7 +729,7 @@ def push_orgunits_update(
                 dhis2_client=dhis2_client_target,
                 orgunit=ou_update,
                 strategy="UPDATE",
-                dry_run=False,  # dry_run=False -> Apply changes in the DHIS2
+                dry_run=dry_run,  # dry_run=False -> Apply changes in the DHIS2
             )
             if response["status"] == "ERROR":
                 errors_count = errors_count + 1
@@ -905,55 +912,215 @@ def build_id_indexes(ou_source, ou_target, ou_matching_ids):
     return index_dict
 
 
+def apply_population_mappings(datapoints_df: pd.DataFrame, mappings: dict) -> pd.DataFrame:
+    datapoints_df = datapoints_df.copy()
+    population_mask = datapoints_df["data_type"] == "POPULATION"
+
+    # UID mappings
+    uids = mappings.get("UIDS", {})
+    if len(uids) > 0:
+        current_run.log_info(f"{len(uids)} Population UIDS to be mapped.")
+        datapoints_df.loc[population_mask, "dx_uid"] = datapoints_df.loc[population_mask, "dx_uid"].replace(
+            mappings.get("UIDS", {})
+        )
+
+    # Org Units are in sync already..
+    # org_units = mappings.get("ORG_UNITS", [])
+    # if len(org_units) > 0:
+
+    # map category option combo default
+    coc_default = mappings["CAT_OPTION_COMBO"].get("DEFAULT")
+    if coc_default:
+        current_run.log_info(f"Using {coc_default} as default COC id for population.")
+        datapoints_df.loc[population_mask, "category_option_combo"] = datapoints_df.loc[
+            population_mask, "category_option_combo"
+        ].replace({None: coc_default})
+
+    # map category option combos
+    coc_to_replace = mappings.get("CAT_OPTION_COMBO", {})
+    if len(coc_to_replace) > 1:
+        current_run.log_info(f"{len(coc_to_replace)} population COC will be mapped.")
+        datapoints_df.loc[population_mask, "category_option_combo"] = datapoints_df.loc[
+            population_mask, "category_option_combo"
+        ].replace(mappings.get("CAT_OPTION_COMBO", {}))
+
+    # map attribute option combo default
+    aoc_default = mappings["ATTR_OPTION_COMBO"].get("DEFAULT")
+    if aoc_default:
+        current_run.log_info(f"Using {aoc_default} as default AOC id for population.")
+        datapoints_df.loc[population_mask, "attribute_option_combo"] = datapoints_df.loc[
+            population_mask, "attribute_option_combo"
+        ].replace({None: aoc_default})
+
+    # map attribute option combo
+    aoc_to_replace = mappings.get("ATTR_OPTION_COMBO", {})
+    if len(aoc_to_replace) > 1:
+        current_run.log_info(f"{len(aoc_to_replace)} population AOC will be mapped.")
+        datapoints_df.loc[population_mask, "attribute_option_combo"] = datapoints_df.loc[
+            population_mask, "attribute_option_combo"
+        ].replace(mappings.get("ATTR_OPTION_COMBO", {}))
+
+    return datapoints_df
+
+
 def apply_dataelement_mappings(datapoints_df: pd.DataFrame, mappings: dict) -> pd.DataFrame:
     """
     All matching ids will be replaced.
     Is user responsability to provide the correct UIDS.
     """
     datapoints_df = datapoints_df.copy()
-    uids_to_replace = set(datapoints_df["dx_uid"]).intersection(mappings.get("UIDS", {}).keys())
+
+    # change in SNIS COC mappings after 2025.
+    # To avoid dupplicates we map and filter the DEs to be pushed
+    # by the expected COC depending on the period (>=202501)
+    if datapoints_df.period[0] >= "202501":
+        datapoints_df = apply_dataelement_mappings_2025(datapoints_df, mappings)
+    else:
+        datapoints_df = apply_dataelement_mappings_2024(datapoints_df, mappings)
+
+    return datapoints_df
+
+
+def apply_dataelement_mappings_2025(datapoints_df: pd.DataFrame, mappings: dict) -> pd.DataFrame:
+    # I just repeat some of the same code for 2024 & 2025 in 2 different methods..
+    datapoints_df = datapoints_df.copy()
+    dataelement_mask = datapoints_df["data_type"] == "DATAELEMENT"
+    current_run.log_debug("Running 2025 COC mappings.")
+
+    uids_to_replace = set(datapoints_df[dataelement_mask].dx_uid).intersection(mappings.get("UIDS", {}).keys())
     if len(uids_to_replace) > 0:
-        current_run.log_info(f"{len(uids_to_replace)} OU UIDS to be replaced using mappings.")
-        datapoints_df.loc[:, "dx_uid"] = datapoints_df["dx_uid"].replace(mappings.get("UIDS", {}))
+        current_run.log_info(f"{len(uids_to_replace)} Data element UIDS to be replaced using mappings.")
+        datapoints_df.loc[dataelement_mask, "dx_uid"] = datapoints_df.loc[dataelement_mask, "dx_uid"].replace(
+            mappings.get("UIDS", {})
+        )
 
     # Fields ou, coc and aoc will throw an error while pushing if wrong..
-    orunits_to_replace = list(set(datapoints_df.org_unit).intersection(set(mappings.get("ORG_UNITS", {}).keys())))
+    orunits_to_replace = set(datapoints_df[dataelement_mask].org_unit).intersection(
+        set(mappings.get("ORG_UNITS", {}).keys())
+    )
     if len(orunits_to_replace) > 0:
-        current_run.log_info(f"{len(orunits_to_replace)} Org units will be replaced using mappings.")
-        datapoints_df.loc[:, "org_unit"] = datapoints_df["org_unit"].replace(mappings.get("ORG_UNITS", {}))
+        current_run.log_info(f"{len(orunits_to_replace)} Data element org units will be mapped.")
+        datapoints_df.loc[dataelement_mask, "org_unit"] = datapoints_df.loc[dataelement_mask, "org_unit"].replace(
+            mappings.get("ORG_UNITS", {})
+        )
+
+    # COC Mappings to apply before 2025-01
+    mappings_coc_2025 = mappings["CAT_OPTION_COMBO"]["MAPPINGS_2025"]
 
     # map category option combo default
-    coc_default = mappings["CAT_OPTION_COMBO"].get("DEFAULT", None)
+    coc_default = mappings_coc_2025.get("DEFAULT", None)
     if coc_default:
-        current_run.log_info(f"Using {coc_default} default COC id.")
-        datapoints_df.loc[:, "category_option_combo"] = datapoints_df["category_option_combo"].replace(
-            {None: coc_default}
-        )
-    # map category option combo values
-    coc_to_replace = set(datapoints_df["category_option_combo"]).intersection(
-        mappings.get("CAT_OPTION_COMBO", {}).keys()
-    )
-    if len(coc_to_replace) > 0:
-        current_run.log_info(f"{len(coc_to_replace)} data elements COC will be replaced using mappings.")
-        datapoints_df.loc[:, "category_option_combo"] = datapoints_df["category_option_combo"].replace(
-            mappings.get("CAT_OPTION_COMBO", {})
-        )
+        current_run.log_info(f"Using {coc_default} default COC for data elements.")
+        datapoints_df.loc[dataelement_mask, "category_option_combo"] = datapoints_df.loc[
+            dataelement_mask, "category_option_combo"
+        ].replace({None: coc_default})
 
-    # map attribute option combo
+    # Loop over the DataElement COC mappings
+    for uid, coc_uids in mappings_coc_2025["UIDS"].items():
+        # Step 1: Remove rows where the dx_uid matches, but the COC is not in the allowed list
+        mask_uid = (datapoints_df["data_type"] == "DATAELEMENT") & (datapoints_df["dx_uid"] == uid)
+        allowed_cocs = list(coc_uids.keys())
+
+        mask_to_remove = mask_uid & ~datapoints_df["category_option_combo"].isin(allowed_cocs)
+        datapoints_df = datapoints_df[~mask_to_remove].copy()
+
+        # Step 2: Replace remaining COC values using the provided mapping
+        dataelement_mask = datapoints_df["data_type"] == "DATAELEMENT"  # reindexing
+        mask_uid = dataelement_mask & (datapoints_df["dx_uid"] == uid)  # reindexing
+        datapoints_df.loc[mask_uid, "category_option_combo"] = datapoints_df.loc[
+            mask_uid, "category_option_combo"
+        ].replace(coc_uids)
+
+    # map attribute option combo default
     aoc_default = mappings["ATTR_OPTION_COMBO"].get("DEFAULT", None)
     if aoc_default:
-        current_run.log_info(f"Using {aoc_default} default AOC id.")
-        datapoints_df.loc[:, "attribute_option_combo"] = datapoints_df["attribute_option_combo"].replace(
-            {None: aoc_default}
-        )
-    aoc_to_replace = set(datapoints_df["attribute_option_combo"]).intersection(
+        current_run.log_info(f"Using {aoc_default} default AOC for data elements.")
+        datapoints_df.loc[dataelement_mask, "attribute_option_combo"] = datapoints_df.loc[
+            dataelement_mask, "attribute_option_combo"
+        ].replace({None: aoc_default})
+
+    # map attribute option combos
+    aoc_to_replace = set(datapoints_df.loc[dataelement_mask, "attribute_option_combo"]).intersection(
         mappings.get("ATTR_OPTION_COMBO", {}).keys()
     )
     if len(aoc_to_replace) > 0:
-        current_run.log_info(f"{len(aoc_to_replace)} data elements AOC will be replaced using mappings.")
-        datapoints_df.loc[:, "attribute_option_combo"] = datapoints_df["attribute_option_combo"].replace(
-            mappings.get("ATTR_OPTION_COMBO", {})
+        current_run.log_info(f"{len(aoc_to_replace)} data elements AOC will be mapped.")
+        datapoints_df.loc[dataelement_mask, "attribute_option_combo"] = datapoints_df.loc[
+            dataelement_mask, "attribute_option_combo"
+        ].replace(mappings.get("ATTR_OPTION_COMBO", {}))
+
+    return datapoints_df
+
+
+def apply_dataelement_mappings_2024(datapoints_df: pd.DataFrame, mappings: dict) -> pd.DataFrame:
+    # I just repeat some of the same code for 2024 & 2025 in 2 different methods..
+    datapoints_df = datapoints_df.copy()
+    dataelement_mask = datapoints_df["data_type"] == "DATAELEMENT"
+    current_run.log_debug("Running 2024 COC mappings.")
+
+    uids_to_replace = set(datapoints_df[dataelement_mask].dx_uid).intersection(mappings.get("UIDS", {}).keys())
+    if len(uids_to_replace) > 0:
+        current_run.log_info(f"{len(uids_to_replace)} Data Element UIDS to be replaced using mappings.")
+        datapoints_df.loc[dataelement_mask, "dx_uid"] = datapoints_df.loc[dataelement_mask, "dx_uid"].replace(
+            mappings.get("UIDS", {})
         )
+
+    # Fields ou, coc and aoc will throw an error while pushing if wrong..
+    orunits_to_replace = set(datapoints_df[dataelement_mask].org_unit).intersection(
+        set(mappings.get("ORG_UNITS", {}).keys())
+    )
+    if len(orunits_to_replace) > 0:
+        current_run.log_info(f"{len(orunits_to_replace)} Data Element org units will be replaced using mappings.")
+        datapoints_df.loc[dataelement_mask, "org_unit"] = datapoints_df.loc[dataelement_mask, "org_unit"].replace(
+            mappings.get("ORG_UNITS", {})
+        )
+
+    # COC Mappings to apply before 2025-01
+    mappings_coc_2024 = mappings["CAT_OPTION_COMBO"]["MAPPINGS_2024"]
+
+    # map category option combo default
+    coc_default = mappings_coc_2024.get("DEFAULT", None)
+    if coc_default:
+        current_run.log_info(f"Using {coc_default} default COC id.")
+        datapoints_df.loc[dataelement_mask, "category_option_combo"] = datapoints_df.loc[
+            dataelement_mask, "category_option_combo"
+        ].replace({None: coc_default})
+
+    # map category option combo values
+    coc_to_replace = set(datapoints_df[dataelement_mask].category_option_combo).intersection(
+        mappings_coc_2024["MAPPINGS"].keys()
+    )
+    if len(coc_to_replace) > 0:
+        current_run.log_info(f"{len(coc_to_replace)} Data elements COC will be replaced using mappings.")
+        datapoints_df.loc[dataelement_mask, "category_option_combo"] = datapoints_df.loc[
+            dataelement_mask, "category_option_combo"
+        ].replace(mappings_coc_2024.get("MAPPINGS", {}))
+
+    # REMOVE List of COC to ignore
+    coc_to_remove = mappings_coc_2024["IGNORE_MAPPINGS"]
+    if len(coc_to_remove) > 0:
+        current_run.log_info(f"{len(coc_to_remove)} Data elements COC will be ignored.")
+        mask = dataelement_mask & datapoints_df["category_option_combo"].isin(coc_to_remove)
+        datapoints_df = datapoints_df[~mask]
+    dataelement_mask = datapoints_df["data_type"] == "DATAELEMENT"  # reindexing
+
+    # map attribute option combo default
+    aoc_default = mappings["ATTR_OPTION_COMBO"].get("DEFAULT", None)
+    if aoc_default:
+        current_run.log_info(f"Using {aoc_default} default AOC for data elements.")
+        datapoints_df.loc[dataelement_mask, "attribute_option_combo"] = datapoints_df.loc[
+            dataelement_mask, "attribute_option_combo"
+        ].replace({None: aoc_default})
+
+    # map attribute option combo
+    aoc_to_replace = set(datapoints_df.loc[dataelement_mask, "attribute_option_combo"]).intersection(
+        mappings.get("ATTR_OPTION_COMBO", {}).keys()
+    )
+    if len(aoc_to_replace) > 0:
+        current_run.log_info(f"{len(aoc_to_replace)} data elements AOC will be mapped.")
+        datapoints_df.loc[dataelement_mask, "attribute_option_combo"] = datapoints_df.loc[
+            dataelement_mask, "attribute_option_combo"
+        ].replace(mappings.get("ATTR_OPTION_COMBO", {}))
 
     return datapoints_df
 
@@ -966,13 +1133,17 @@ def apply_rate_mappings(datapoints_df: pd.DataFrame, mappings: dict) -> pd.DataF
     Is user responsability to provide the correct UIDS.
     """
     datapoints_df = datapoints_df.copy()
-    for key, value in mappings.items():
-        datapoints_df.loc[((datapoints_df.dx_uid == key) & (datapoints_df.rate_type == "REPORTING_RATE")), "dx_uid"] = (
-            value["REPORTING_RATE"]
-        )
-        datapoints_df.loc[
-            ((datapoints_df.dx_uid == key) & (datapoints_df.rate_type == "REPORTING_RATE_ON_TIME")), "dx_uid"
-        ] = value["REPORTING_RATE_ON_TIME"]
+    rates_mask = datapoints_df["data_type"] == "DATASET"
+    # NOTE: This COC and AOC are applied by default to all rates (!)
+    coc_default = mappings["CAT_OPTION_COMBO"].get("DEFAULT", "HllvX50cXC0")
+    aoc_default = mappings["ATTR_OPTION_COMBO"].get("DEFAULT", "HllvX50cXC0")
+    current_run.log_debug(f"(!) The default '{coc_default}' COC and AOC are applied to all rates.")
+    for uid, metrics in mappings["UIDS"].items():
+        for metric_name, new_uid in metrics.items():
+            mask = rates_mask & (datapoints_df["dx_uid"] == uid) & (datapoints_df["rate_type"] == metric_name)
+            datapoints_df.loc[mask, "dx_uid"] = new_uid
+            datapoints_df.loc[mask, "category_option_combo"] = coc_default
+            datapoints_df.loc[mask, "attribute_option_combo"] = aoc_default
 
     return datapoints_df
 
@@ -984,19 +1155,29 @@ def apply_acm_mappings(datapoints_df: pd.DataFrame, mappings: dict) -> pd.DataFr
     Is user responsability to provide the correct UIDS.
     """
     datapoints_df = datapoints_df.copy()
-    uids_acm_to_replace = set(datapoints_df["dx_uid"]).intersection(mappings.get("UIDS", {}).keys())
+    indicators_mask = datapoints_df["data_type"] == "INDICATOR"
+    uids_acm_to_replace = mappings.get("UIDS", {})
     if len(uids_acm_to_replace) > 0:
-        current_run.log_info(f"{len(uids_acm_to_replace)} ACM indicator(s) to be replaced using mappings.")
-        datapoints_df.loc[:, "dx_uid"] = datapoints_df["dx_uid"].replace(mappings.get("UIDS", {}))
+        current_run.log_info(f"{len(uids_acm_to_replace)} ACM indicator(s) uids to be mapped.")
+        datapoints_df.loc[indicators_mask, "dx_uid"] = datapoints_df.loc[indicators_mask, "dx_uid"].replace(
+            uids_acm_to_replace
+        )
 
     # map category option combo default
     coc_default = mappings["CAT_OPTION_COMBO"].get("DEFAULT", None)
-    if coc_default and len(uids_acm_to_replace) > 0:
+    if coc_default:
         current_run.log_info(f"Using {coc_default} default COC id mapping on ACM.")
-        # print(f"Using {coc_default} default COC id mapping on ACM.")
-        datapoints_df.loc[datapoints_df.dx_uid.isin(mappings.get("UIDS", {}).values()), "category_option_combo"] = (
-            coc_default
-        )
+        datapoints_df.loc[indicators_mask, "category_option_combo"] = datapoints_df.loc[
+            indicators_mask, "category_option_combo"
+        ].replace({None: coc_default})
+
+    # map attribute option combo default
+    aoc_default = mappings["ATTR_OPTION_COMBO"].get("DEFAULT", None)
+    if aoc_default:
+        current_run.log_info(f"Using {aoc_default} default AOC id on ACM.")
+        datapoints_df.loc[indicators_mask, "attribute_option_combo"] = datapoints_df.loc[
+            indicators_mask, "attribute_option_combo"
+        ].replace({None: aoc_default})
 
     return datapoints_df
 
