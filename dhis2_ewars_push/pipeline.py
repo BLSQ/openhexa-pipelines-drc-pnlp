@@ -4,6 +4,8 @@ import os
 from datetime import datetime, date, timedelta
 from unidecode import unidecode
 from rapidfuzz import fuzz, process
+import json
+import requests
 
 from openhexa.sdk import pipeline, workspace, current_run, parameter
 from openhexa.toolbox.dhis2 import DHIS2
@@ -11,6 +13,8 @@ from openhexa.toolbox.dhis2.dataframe import get_organisation_units
 
 import config
 from ewars_client import EWARSClient
+
+from utils import split_list, get_response_value_errors
 
 
 @pipeline("dhis2-ewars-push")
@@ -43,9 +47,10 @@ def dhis2_ewars_push(extract_pyramids, extract_all_ewars, date_start, date_end):
     ADD SUMMARY OF PIPELINE HERE.
     """
     ewars = get_ewars()
-    dhis2 = get_dhis2()
+    dhis2_snis = get_dhis2("drc-snis")
+    dhis_nmdr = get_dhis2("dhis2-nmdr-drc")
     ewars_pyramid = get_ewars_pyramid(extract_pyramids, ewars)
-    dhis2_pyramid = get_dhis2_pyramid(extract_pyramids, dhis2)
+    dhis2_pyramid = get_dhis2_pyramid(extract_pyramids, dhis2_snis)
     full_pyramid = match_pyramid(df_ewars=ewars_pyramid, df_dhis2=dhis2_pyramid, extract_pyramids=extract_pyramids)
     check_pyramid(full_pyramid)
     list_dates = get_list_dates(date_start, date_end)
@@ -53,6 +58,7 @@ def dhis2_ewars_push(extract_pyramids, extract_all_ewars, date_start, date_end):
     ewars_extract_concat = concat_ewars_forms(ewars_extract_list)
     ewars_formated = format_ewars_extract(ewars_extract_concat, full_pyramid)
     ewars_dhis2 = put_dhis2_format(ewars_formated)
+    summary = push_data_elements(dhis_nmdr, ewars_dhis2)
 
 
 @dhis2_ewars_push.task
@@ -78,7 +84,7 @@ def put_dhis2_format(ewars_extract: pd.DataFrame):
         categoryOptionCombo = config.dict_dE_CoC[service][1]
         orgUnit = row["dhis2_level_4_id"]
         value = str(row["value"])
-        period = row["epi_week"]
+        period = row["epi_week"].replace("-W", "W")
         values_to_post.append(
             {
                 "dataElement": dataElement,
@@ -366,6 +372,8 @@ def format_ewars_extract(ewars_not_melted: pd.DataFrame, full_pyramid: pd.DataFr
     )
     current_run.log_info("I have merged the ewars extract with the full pyramid.")
 
+    pl_ewars_not_melted = remove_unwanted_locations(pl_ewars_not_melted)
+
     pl_ewars_extract = pl_ewars_not_melted.melt(
         id_vars=config.relevant_info_cols + config.relevant_level_cols,
         variable_name="variable",
@@ -396,6 +404,36 @@ def format_ewars_extract(ewars_not_melted: pd.DataFrame, full_pyramid: pd.DataFr
     ewars_extract.to_parquet(path_ewars_extract)
 
     return ewars_extract
+
+
+def remove_unwanted_locations(ewars_extract: pl.DataFrame):
+    """
+    There are some locations that have been badly matched. We will remove them from the push
+    (We would not like to push incorrrect data).
+
+    Parameters
+    ----------
+    ewars_extract : pl.DataFrame
+        The ewars extract.
+
+    Returns
+    -------
+    pl.DataFrame
+        The ewars extract without the unwanted locations.
+    """
+    ewars_extract_mod = ewars_extract.filter(~pl.col("ewars_level_4_name_cleaned").is_in(config.list_ewars_to_remove))
+    # With this line you also drop the NULLs.
+    removed_repeated = ewars_extract.filter(pl.col("ewars_level_4_name_cleaned").is_in(config.list_ewars_to_remove))
+    if not removed_repeated.is_empty:
+        current_run.log_info(
+            f"I have removed {removed_repeated.height} locations that were not correctly matched from the ewars extract."
+        )
+        path = (
+            f"{workspace.files_path}/pipelines/dhis2_ewars_push/processed/repeated_values/repeated_removed_{dt}.parquet"
+        )
+        removed_repeated.write_parquet(path)
+
+    return ewars_extract_mod
 
 
 def look_at_value_col(ewars_extract: pl.DataFrame):
@@ -755,6 +793,85 @@ def get_dhis2(con_name: str = "drc"):
     con_dhis = workspace.dhis2_connection(con_name)
     current_run.log_info("Connected to the DHIS2 instance.")
     return DHIS2(con_dhis)
+
+
+@dhis2_ewars_push.task
+def push_data_elements(
+    dhis2_client: DHIS2,
+    data_elements_list: list,
+    strategy: str = "CREATE_AND_UPDATE",
+    dry_run: bool = True,
+    max_post: int = 1000,
+) -> dict:
+    """dry_run: Set to true to get an import summary without actually importing data (DHIS2).
+
+    Returns
+    -------
+        dict: A summary dictionary containing import counts and errors.
+    """
+    # max_post instead of MAX_POST_DATA_VALUES
+    summary = {
+        "import_counts": {"imported": 0, "updated": 0, "ignored": 0, "deleted": 0},
+        "import_options": {},
+        "ERRORS": [],
+    }
+
+    total_datapoints = len(data_elements_list)
+    count = 0
+
+    for chunk in split_list(data_elements_list, max_post):
+        count = count + 1
+        try:
+            r = dhis2_client.api.session.post(
+                f"{dhis2_client.api.url}/dataValueSets",
+                json={"dataValues": chunk},
+                params={
+                    "dryRun": dry_run,
+                    "importStrategy": strategy,
+                    "preheatCache": True,
+                    "skipAudit": True,
+                },  # speed!
+            )
+            r.raise_for_status()
+
+            try:
+                response_json = r.json()
+                status = response_json.get("httpStatus")
+                response = response_json.get("response")
+            except json.JSONDecodeError as e:
+                summary["ERRORS"].append(f"Response JSON decoding failed: {e}")  # period: {chunk_period}")
+                response_json = None
+                status = None
+                response = None
+
+            if status != "OK" and response:
+                summary["ERRORS"].append(response)
+
+            if response:
+                for key in ["imported", "updated", "ignored", "deleted"]:
+                    summary["import_counts"][key] += response.get("importCount", {}).get(key, 0)
+
+        except requests.exceptions.RequestException as e:
+            try:
+                response = r.json().get("response")
+            except (ValueError, AttributeError):
+                response = None
+
+            if response:
+                for key in ["imported", "updated", "ignored", "deleted"]:
+                    summary["import_counts"][key] += response["importCount"][key]
+
+            error_response = get_response_value_errors(response, chunk=chunk)
+            summary["ERRORS"].append({"error": e, "response": error_response})
+
+        if (count * max_post) % 10000 == 0:
+            current_run.log_info(
+                f"{count * max_post} / {total_datapoints} data points pushed summary: {summary['import_counts']}"
+            )
+
+    current_run.log_info(f"Push completed. Final summary: {summary['import_counts']}")
+
+    return summary
 
 
 @dhis2_ewars_push.task

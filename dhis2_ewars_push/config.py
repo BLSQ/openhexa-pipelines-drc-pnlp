@@ -131,3 +131,12 @@ dict_dE_CoC = relevant_malaria_cols = {
     "paludisme_confirm_**_s1_paludisme_confirm-deces_5-15ans": ["kVj09UWaJLJ", "aOSANPvwJSP"],
     "paludisme_confirm_**_s1_paludisme_confirm-deces_>15ans": ["kVj09UWaJLJ", "Coa89kwZpQG"],
 }
+
+list_ewars_to_remove = [
+    "MBANGUMBAMU",
+    "KAILENGE",
+    "MIKUMBI",
+    "KINKUZU",
+    "KIRIKIRI",
+    "TEMBO",
+]
