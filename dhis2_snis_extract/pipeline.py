@@ -433,6 +433,7 @@ def retrieve_snis_rates_extract(dhis2_snis_client: DHIS2, period: str, org_unit_
     reporting_datasets = rate_year.get("DATASETS", [])
     reporting_metrics = rate_year.get("METRICS", {}).keys()
     reporting_combinations = [f"{ds}.{metric}" for ds, metric in product(reporting_datasets, reporting_metrics)]
+    current_run.log_debug(f"Reporting ids: {reporting_combinations}")
 
     try:
         response = dhis2_snis_client.analytics.get(
