@@ -392,17 +392,17 @@ def push_extracts(
                 continue
 
             # NOTE: FILTER -> DO NOT PUSH THESE RATES, NOT USED!
-            uids_to_filter = ["pMbC0FJPkcm", "maDtHIFrSHx", "OeWrFwkFMvf"]
-            rate_types_to_remove = ["ACTUAL_REPORTS", "EXPECTED_REPORTS", "ACTUAL_REPORTS_ON_TIME"]
-            df = extract_data[
-                ~(
-                    (extract_data["dx_uid"].isin(uids_to_filter))
-                    & (extract_data["rate_type"].isin(rate_types_to_remove))
-                )
-            ].copy()
+            # uids_to_filter = ["pMbC0FJPkcm", "maDtHIFrSHx", "OeWrFwkFMvf"]
+            # rate_types_to_remove = ["ACTUAL_REPORTS", "EXPECTED_REPORTS", "ACTUAL_REPORTS_ON_TIME"]
+            # df = extract_data[
+            #     ~(
+            #         (extract_data["dx_uid"].isin(uids_to_filter))
+            #         & (extract_data["rate_type"].isin(rate_types_to_remove))
+            #     )
+            # ].copy()
 
             # Use dictionary mappings to replace UIDS, OrgUnits, COC and AOC..
-            df = apply_dataelement_mappings(datapoints_df=df, mappings=dataelement_mappings)
+            df = apply_dataelement_mappings(datapoints_df=extract_data, mappings=dataelement_mappings)
             df = apply_rate_mappings(datapoints_df=df, mappings=rate_mappings)
             df = apply_acm_mappings(datapoints_df=df, mappings=acm_mappings)
 
@@ -995,11 +995,11 @@ def apply_dataelement_mappings_2025(datapoints_df: pd.DataFrame, mappings: dict)
         )
 
     # Fields ou, coc and aoc will throw an error while pushing if wrong..
-    orunits_to_replace = set(datapoints_df[dataelement_mask].org_unit).intersection(
+    orgunits_to_replace = set(datapoints_df[dataelement_mask].org_unit).intersection(
         set(mappings.get("ORG_UNITS", {}).keys())
     )
-    if len(orunits_to_replace) > 0:
-        current_run.log_info(f"{len(orunits_to_replace)} Data element org units will be mapped.")
+    if len(orgunits_to_replace) > 0:
+        current_run.log_info(f"{len(orgunits_to_replace)} Data element org units will be mapped.")
         datapoints_df.loc[dataelement_mask, "org_unit"] = datapoints_df.loc[dataelement_mask, "org_unit"].replace(
             mappings.get("ORG_UNITS", {})
         )
@@ -1018,18 +1018,28 @@ def apply_dataelement_mappings_2025(datapoints_df: pd.DataFrame, mappings: dict)
     # Loop over the DataElement COC mappings
     for uid, coc_uids in mappings_coc_2025["UIDS"].items():
         # Step 1: Remove rows where the dx_uid matches, but the COC is not in the allowed list
-        mask_uid = (datapoints_df["data_type"] == "DATAELEMENT") & (datapoints_df["dx_uid"] == uid)
-        allowed_cocs = list(coc_uids.keys())
+        mask_uid = (datapoints_df["data_type"] == "DATAELEMENT") & (datapoints_df["dx_uid"] == uid.strip())
+        coc_uids_clean = {k.strip(): v.strip() for k, v in coc_uids.items()}
+        allowed_cocs = list(coc_uids_clean.keys())
 
-        mask_to_remove = mask_uid & ~datapoints_df["category_option_combo"].isin(allowed_cocs)
-        datapoints_df = datapoints_df[~mask_to_remove].copy()
+        if allowed_cocs:
+            mask_to_remove = mask_uid & ~datapoints_df["category_option_combo"].isin(allowed_cocs)
+            datapoints_df = datapoints_df[~mask_to_remove].copy()
 
         # Step 2: Replace remaining COC values using the provided mapping
         dataelement_mask = datapoints_df["data_type"] == "DATAELEMENT"  # reindexing
-        mask_uid = dataelement_mask & (datapoints_df["dx_uid"] == uid)  # reindexing
+        mask_uid = dataelement_mask & (datapoints_df["dx_uid"] == uid.strip())  # reindexing
         datapoints_df.loc[mask_uid, "category_option_combo"] = datapoints_df.loc[
             mask_uid, "category_option_combo"
-        ].replace(coc_uids)
+        ].replace(coc_uids_clean)
+
+    # Apply COC General mappings (to all other COC in the extract)
+    gen_mappings = mappings_coc_2025.get("GENERAL_MAPPINGS", {})
+    gen_mappings_clean = {k.strip(): v.strip() for k, v in gen_mappings.items()}
+    if len(gen_mappings_clean) > 0:
+        datapoints_df.loc[dataelement_mask, "category_option_combo"] = datapoints_df.loc[
+            dataelement_mask, "category_option_combo"
+        ].replace(gen_mappings_clean)
 
     # map attribute option combo default
     aoc_default = mappings["ATTR_OPTION_COMBO"].get("DEFAULT", None)
@@ -1066,11 +1076,11 @@ def apply_dataelement_mappings_2024(datapoints_df: pd.DataFrame, mappings: dict)
         )
 
     # Fields ou, coc and aoc will throw an error while pushing if wrong..
-    orunits_to_replace = set(datapoints_df[dataelement_mask].org_unit).intersection(
+    orgunits_to_replace = set(datapoints_df[dataelement_mask].org_unit).intersection(
         set(mappings.get("ORG_UNITS", {}).keys())
     )
-    if len(orunits_to_replace) > 0:
-        current_run.log_info(f"{len(orunits_to_replace)} Data Element org units will be replaced using mappings.")
+    if len(orgunits_to_replace) > 0:
+        current_run.log_info(f"{len(orgunits_to_replace)} Data Element org units will be replaced using mappings.")
         datapoints_df.loc[dataelement_mask, "org_unit"] = datapoints_df.loc[dataelement_mask, "org_unit"].replace(
             mappings.get("ORG_UNITS", {})
         )
