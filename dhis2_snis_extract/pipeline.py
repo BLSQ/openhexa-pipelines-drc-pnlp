@@ -4,7 +4,8 @@ from datetime import datetime
 from itertools import product
 
 import pandas as pd
-import polars as pl
+
+# import polars as pl
 from dateutil.relativedelta import relativedelta
 from openhexa.sdk import current_run, parameter, pipeline, workspace
 from openhexa.toolbox.dhis2 import DHIS2
@@ -46,7 +47,6 @@ def dhis2_snis_extract(extract_orgunits: bool, extract_pop: bool, extract_analyt
     """
     Simple pipeline to retrieve the a monthly PNLP related data extract from DHIS2 SNIS instance.
     """
-
     # setup variables
     PIPELINE_ROOT = os.path.join(f"{workspace.files_path}", "pipelines", "dhis2_snis_extract")
 
@@ -134,16 +134,14 @@ def extract_snis_pyramid(pipeline_path: str, dhis2_snis_client: DHIS2, run_pipel
     current_run.log_info("Retrieving SNIS DHIS2 pyramid data")
 
     try:
-        # Retrieve all available levels..
-        levels = pl.DataFrame(dhis2_snis_client.meta.organisation_unit_levels())
-        org_levels = levels.select("level").unique().sort(by="level").to_series().to_list()
+        # retrieve full pyramid
         org_units = dhis2_snis_client.meta.organisation_units(
             fields="id,name,shortName,openingDate,closedDate,parent,level,path,geometry"
         )
         org_units = pd.DataFrame(org_units)
-
+        org_units = org_units[org_units.level <= 5]  # Select level 5
         current_run.log_info(
-            f"Extracted {len(org_units[org_units.level == org_levels[-1]].id.unique())} units at organisation unit level {org_levels[-1]}"
+            f"Extracted {len(org_units[org_units.level == 5].id.unique())} units at organisation unit level {5}"
         )
 
         # pyramid_table = build_pyramid_table(org_units, org_levels)
@@ -428,16 +426,17 @@ def retrieve_snis_routine_extract(
 
 
 def retrieve_snis_rates_extract(dhis2_snis_client: DHIS2, period: str, org_unit_list: list, rate_ids: dict):
-    reporting_des = []
-    for rates in rate_ids:
-        reporting_datasets = rates.get("DATASETS")
-        reporting_metrics = rates.get("METRICS")
-        reporting_combinations = [f"{ds}.{metric}" for ds, metric in product(reporting_datasets, reporting_metrics)]
-        reporting_des.extend(reporting_combinations)
+    if period >= "202501":
+        rate_year = rate_ids.get("2025")
+    else:
+        rate_year = rate_ids.get("2024")
+    reporting_datasets = rate_year.get("DATASETS", [])
+    reporting_metrics = rate_year.get("METRICS", {}).keys()
+    reporting_combinations = [f"{ds}.{metric}" for ds, metric in product(reporting_datasets, reporting_metrics)]
 
     try:
         response = dhis2_snis_client.analytics.get(
-            data_elements=reporting_des,
+            data_elements=reporting_combinations,
             periods=[period],
             org_units=org_unit_list,
             include_cocs=False,
