@@ -391,16 +391,6 @@ def push_extracts(
                 )
                 continue
 
-            # NOTE: FILTER -> DO NOT PUSH THESE RATES, NOT USED!
-            # uids_to_filter = ["pMbC0FJPkcm", "maDtHIFrSHx", "OeWrFwkFMvf"]
-            # rate_types_to_remove = ["ACTUAL_REPORTS", "EXPECTED_REPORTS", "ACTUAL_REPORTS_ON_TIME"]
-            # df = extract_data[
-            #     ~(
-            #         (extract_data["dx_uid"].isin(uids_to_filter))
-            #         & (extract_data["rate_type"].isin(rate_types_to_remove))
-            #     )
-            # ].copy()
-
             # Use dictionary mappings to replace UIDS, OrgUnits, COC and AOC..
             df = apply_dataelement_mappings(datapoints_df=extract_data, mappings=dataelement_mappings)
             df = apply_rate_mappings(datapoints_df=df, mappings=rate_mappings)
@@ -1144,11 +1134,17 @@ def apply_rate_mappings(datapoints_df: pd.DataFrame, mappings: dict) -> pd.DataF
     """
     datapoints_df = datapoints_df.copy()
     rates_mask = datapoints_df["data_type"] == "DATASET"
+
+    if datapoints_df.period[0] >= "202501":
+        mappings_year = mappings.get("2025", {})
+    else:
+        mappings_year = mappings.get("2024", {})
+
     # NOTE: This COC and AOC are applied by default to all rates (!)
     coc_default = mappings["CAT_OPTION_COMBO"].get("DEFAULT", "HllvX50cXC0")
     aoc_default = mappings["ATTR_OPTION_COMBO"].get("DEFAULT", "HllvX50cXC0")
     current_run.log_debug(f"(!) The default '{coc_default}' COC and AOC are applied to all rates.")
-    for uid, metrics in mappings["UIDS"].items():
+    for uid, metrics in mappings_year.items():
         for metric_name, new_uid in metrics.items():
             mask = rates_mask & (datapoints_df["dx_uid"] == uid) & (datapoints_df["rate_type"] == metric_name)
             datapoints_df.loc[mask, "dx_uid"] = new_uid
