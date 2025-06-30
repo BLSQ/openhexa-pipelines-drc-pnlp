@@ -1,0 +1,98 @@
+{
+	"EXTRACT_SETTINGS": {
+		"NUMBER_MONTHS_WINDOW": 5,
+		"STARTDATE": "202501",
+		"ENDDATE": "",
+		"LASTUPDATE_WINDOW": 2,
+		"MODE": "DOWNLOAD_REPLACE",
+		"DHIS2_CONNECTION": "drc-snis"
+	},
+	"ROUTINE_DATA_ELEMENT_UIDS": [
+		"aZwnLALknnj",
+		"kGmdIbd3mbn",
+		"IPnqGkUUN6U",
+		"xqw3Jvrkk1M",
+		"CIzQAR8IWH1",
+		"uV53nh3MrYl",
+		"ZpmFCs2dyxD",
+		"sRbXNrdKvyl",
+		"ZJnypGdwZ0G",
+		"bdy45DCTJLB",
+		"FVJ2v5RgBgL",
+		"PLjvTAvttMR",
+		"JD1dcTpKSic",
+		"fsBcCCKHGUx",
+		"YQG37Uw70oU",
+		"BCcFZzgTlxQ",
+		"b0f8cOW1CFV",
+		"eKHjiGzfBep",
+		"vtqAD1gqMxx",
+		"AxJhIi7tUam",
+		"ccpDQ5umc0a",
+		"cTLKwfG8pSv",
+		"hgjnpRWXunB",
+		"NquDFFwuMRu",
+		"ypN69muDHoO",
+		"SpmQSLRPMl4",
+		"Xt48UQAZppa",
+		"rfeqp2kdOGi",
+		"pOZcn5GNnRD",
+		"CGZbvJchfjk",
+		"eounDZJHMgn",
+		"e6qMP9fVtG9",
+		"jlRZE5tTARe",
+		"nRm30I4w9En",
+		"uIqmxJcTuub",
+		"oDOcYJ4wLRP",
+		"QafSfDEL1Ku",
+		"UHAfqWdf7WO",
+		"D3h3Qvl0332",
+		"ONRbtRbf64B",
+		"imqSmhfQTPN",
+		"fHyOLs6mPEr",
+		"HMnLiYTxJBf",
+		"wfmDVt6RVm2",
+		"pScfYi2Qxop",
+		"bwUSX4FMAEM",
+		"nFjuJLLeejV",
+		"aK0QXqm8Zxn",
+		"JXm8J8GRJxI"
+	],
+	"RATE_UIDS": {
+		"2024" : {
+			"DATASETS" : [
+				"pMbC0FJPkcm",
+				"maDtHIFrSHx",
+				"OeWrFwkFMvf"
+			],
+			"METRICS": {
+				"REPORTING_RATE": "float",
+				"REPORTING_RATE_ON_TIME": "float",
+				"EXPECTED_REPORTS" : "float",
+				"ACTUAL_REPORTS" : "float",
+				"ACTUAL_REPORTS_ON_TIME" : "float"
+			}
+		},
+		"2025" : {
+			"DATASETS" : [
+				"ahT7ysZZ913",
+				"E4BX1ea2iDJ",
+				"DxDuYrrZSa7",
+				"CfCNNEwbTSH"
+			],
+			"METRICS": {
+				"REPORTING_RATE": "float",
+				"REPORTING_RATE_ON_TIME": "float",
+				"EXPECTED_REPORTS" : "float",
+				"ACTUAL_REPORTS" : "float",
+				"ACTUAL_REPORTS_ON_TIME" : "float"				
+			}
+		}
+	}, 	
+	"ACM_INDICATOR_UIDS": [
+		"fvlFcxuGRng"
+	],
+	"POPULATION_UIDS": [
+		"WLSKVyA8LoY"
+	]
+}
