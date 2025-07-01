@@ -1,0 +1,40 @@
+{
+	"SETTINGS": {
+		"DHIS2_CONNECTION": "drc-snis",
+		"NUMBER_MONTHS_WINDOW": 5,
+		"STARTDATE": "201702",
+		"ENDDATE": "",
+		"MODE" : "DOWNLOAD_REPLACE"
+	},
+	"DATA_ELEMENTS" : {
+		"UIDS" : [
+			"QxEEqOShKJl",
+			"lKFExMDfU0A",
+			"nMuPFZEyRsM",
+			"tnQvtUjsmKB",
+			"yY8dQcyihNc",
+			"BCcP6Ge0BYn",
+			"asONHCQYD5e",
+			"VyE33ukOTq1",
+			"h5BiBesfP7d",
+			"ciOqz48xCMH",
+			"DOeUfjLh2yw",
+			"WH4G0SFxD3C",
+			"ciOqz48xCMH",
+			"S007ecRnpvZ",
+			"OUSS5mSrz1x",
+			"k0p1UVeogJz",
+			"olddIVd8ujN",
+			"etQQW7XSZW3",
+			"sXbYvrs4BKJ",
+			"oDmZPbTpAok",
+			"MTIIsd3cyw9",
+			"uhNqvN82uIg",
+			"EZtLv8BfV3l",
+			"SxQYrM3YG9X",
+			"LS7EJuX7hGu",
+			"xaAeHwfNg70",
+			"Xif5Jbi5ICx"
+			]	
+	}
+}
