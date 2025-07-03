@@ -183,6 +183,7 @@ def extract_data(pipeline_path: Path, run_task: bool, wait: bool):
         current_run.log_info(f"Download MODE: {config['SETTINGS']['MODE']} from: {start} to {end}")
 
         # retrieve data
+        extract_finished = False
         for period in extract_periods:
             current_run.log_info(f"Retrieving data extract for period : {period}")
             handle_extract_for_period(
@@ -194,12 +195,13 @@ def extract_data(pipeline_path: Path, run_task: bool, wait: bool):
                 data_elements=data_elements,
                 queue=push_queue,
             )
+        extract_finished = True
         current_run.log_info("Extract process finished.")
-
     except Exception as e:
         raise Exception(f"Extract task error : {e}") from e
     finally:
-        push_queue.enqueue("FINISH")
+        if extract_finished:
+            push_queue.enqueue("FINISH")
 
 
 @dhis2_data_elements_sync.task
@@ -251,7 +253,6 @@ def push_extracts(
         while True:
             next_period = push_queue.peek()  # I dont remove yet, just take a look at the next period
             if next_period == "FINISH":
-                current_run.log_info("No more extracts to push.")
                 push_queue.dequeue()  # remove the FINISH marker
                 break
 
