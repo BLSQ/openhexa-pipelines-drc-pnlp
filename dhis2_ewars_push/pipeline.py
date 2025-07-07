@@ -32,7 +32,7 @@ from utils import split_list, get_response_value_errors
     help="Format DDMMYYYY. Included to the largest epi-week.",
     type=int,
     required=True,
-    default=20241001,
+    default=20241201,
 )
 @parameter(
     "date_end",
@@ -40,11 +40,17 @@ from utils import split_list, get_response_value_errors
     help="Format DDMMYYYY. Included to the largest epi-week.",
     type=int,
     required=True,
-    default=20241031,
+    default=20241231,
 )
-def dhis2_ewars_push(extract_pyramids, extract_all_ewars, date_start, date_end):
+@parameter(
+    "dry_run",
+    name="Dry run",
+    type=bool,
+    default=True,
+)
+def dhis2_ewars_push(extract_pyramids, extract_all_ewars, date_start, date_end, dry_run):
     """
-    ADD SUMMARY OF PIPELINE HERE.
+    Pipeline to push dataElements to DHIS2
     """
     ewars = get_ewars()
     dhis2_snis = get_dhis2("drc-snis")
@@ -58,7 +64,7 @@ def dhis2_ewars_push(extract_pyramids, extract_all_ewars, date_start, date_end):
     ewars_extract_concat = concat_ewars_forms(ewars_extract_list)
     ewars_formated = format_ewars_extract(ewars_extract_concat, full_pyramid)
     ewars_dhis2 = put_dhis2_format(ewars_formated)
-    summary = push_data_elements(dhis_nmdr, ewars_dhis2)
+    summary = push_data_elements(dhis_nmdr, ewars_dhis2, dry_run)
 
 
 @dhis2_ewars_push.task
@@ -799,8 +805,8 @@ def get_dhis2(con_name: str = "drc"):
 def push_data_elements(
     dhis2_client: DHIS2,
     data_elements_list: list,
+    dry_run: bool,
     strategy: str = "CREATE_AND_UPDATE",
-    dry_run: bool = True,
     max_post: int = 1000,
 ) -> dict:
     """dry_run: Set to true to get an import summary without actually importing data (DHIS2).
