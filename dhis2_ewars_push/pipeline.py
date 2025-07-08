@@ -917,8 +917,9 @@ def extract_ewars_pyramid(ewars: EWARSClient):
         path_pyramid = f"{workspace.files_path}/pipelines/dhis2_ewars_push/raw/pyramids/ewars_locations.parquet"
         raw_pyramid = pd.read_parquet(path_pyramid)"""
 
-    path_pyramid = f"{workspace.files_path}/pipelines/dhis2_ewars_push/raw/pyramids/locations_new.parquet"
+    path_pyramid = f"{workspace.files_path}/pipelines/dhis2_ewars_push/raw/pyramids/ewars_locations.parquet"
     raw_pyramid = pd.read_parquet(path_pyramid)
+
     pyramid = clean_ewars_pyramid(raw_pyramid)
     return pyramid
 
