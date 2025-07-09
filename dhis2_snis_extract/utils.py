@@ -88,7 +88,7 @@ def save_to_parquet(data: pd.DataFrame, filename: str):
 
     Args:
         data (pd.DataFrame): The DataFrame to save.
-        filename (str): The path where the Parquet file will be saved.
+        filename (str): The path where the Parquet file will be saved. (should be a Path)
 
     Returns:
         None
