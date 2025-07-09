@@ -5,6 +5,7 @@ from dateutil.relativedelta import relativedelta
 import sqlite3
 from typing import List
 import json
+import tempfile
 
 
 def get_periods_yyyymm(start_period: str, end_period: str) -> list:
@@ -83,28 +84,33 @@ def first_day_of_future_month(date: str, months_to_add: int) -> str:
 
 def save_to_parquet(data: pd.DataFrame, filename: str):
     """
-    Safely saves a DataFrame to a Parquet file.
+    Safely saves a DataFrame to a Parquet file using a temporary file and atomic replace.
 
     Args:
         data (pd.DataFrame): The DataFrame to save.
-        file_path (str): The path where the Parquet file will be saved.
+        filename (str): The path where the Parquet file will be saved.
 
     Returns:
         None
     """
     try:
-        # Ensure the data is a DataFrame
         if not isinstance(data, pd.DataFrame):
             raise TypeError("The 'data' parameter must be a pandas DataFrame.")
 
-        # Save the DataFrame as a Parquet file
-        data.to_parquet(
-            os.path.join(filename),
-            engine="pyarrow",
-            index=False,
-        )
+        # Write to a temporary file in the same directory
+        dir_name = os.path.dirname(filename)
+        with tempfile.NamedTemporaryFile(suffix=".parquet", dir=dir_name, delete=False) as tmp_file:
+            temp_filename = tmp_file.name
+            data.to_parquet(temp_filename, engine="pyarrow", index=False)
+
+        # Atomically replace the old file with the new one
+        # shutil.move(temp_filename, filename)
+        os.replace(temp_filename, filename)
 
     except Exception as e:
+        # Clean up the temp file if it exists
+        if "temp_filename" in locals() and os.path.exists(temp_filename):
+            os.remove(temp_filename)
         raise Exception(f"An unexpected error occurred while saving the parquet file: {e}")
 
 
