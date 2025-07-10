@@ -5,7 +5,7 @@ from datetime import datetime
 from openhexa.sdk import current_run, pipeline, parameter, workspace
 
 
-@pipeline(code="sentinel-update-extract", name="Sentinel update extract")
+@pipeline("sentinel-update-extract")
 @parameter(
     "get_year",
     name="Year",
@@ -14,14 +14,6 @@ from openhexa.sdk import current_run, pipeline, parameter, workspace
     default=2024,
     required=True,
 )
-# @parameter(
-#     "update_legacy",
-#     name="Update legacy",
-#     help="Update legacy OpenHexa database",
-#     type=bool,
-#     default=False,
-#     required=False,
-# )
 @parameter(
     "update_pnlp",
     name="Update pnlp",
@@ -81,7 +73,8 @@ def run_update_with(nb_name: str, nb_path: str, out_nb_path: str, parameters: di
     try:
         pm.execute_notebook(input_path=nb_full_path, output_path=out_nb_full_path, parameters=parameters)
     except Exception as e:
-        current_run.log_info(f"Caught error {type(e)}: e")
+        current_run.log_error(f"Caught error {type(e)}: e")
+        raise
 
     current_run.log_info("Sentinel table updated")
 
@@ -101,9 +94,7 @@ def run_sentinel_oug_update(parameters: dict):
             parameters=parameters,
         )
     except Exception as e:
-        current_run.log_info(f"Sentinel OU groups update error {type(e)}: e")
-
-    # current_run.log_info(f"Sentinel organisation unit groups file updated for year {parameters['ANNEE_A_ANALYSER']}.")
+        raise Exception(f"Sentinel OU groups update error {type(e)}") from e
 
     return True
 
