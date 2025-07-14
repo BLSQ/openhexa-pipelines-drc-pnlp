@@ -24,34 +24,14 @@ from utils import split_list, get_response_value_errors
     name="Extract all of the EWARS form",
     help="Even if they are already present",
     type=bool,
-    default=False,
-)
-@parameter(
-    "date_start",
-    name="Start date for the extraction",
-    help="Format DDMMYYYY. Included to the largest epi-week.",
-    type=int,
-    required=True,
-    default=20241201,
-)
-@parameter(
-    "date_end",
-    name="End date for the extraction",
-    help="Format DDMMYYYY. Included to the largest epi-week.",
-    type=int,
-    required=True,
-    default=20241231,
-)
-@parameter(
-    "dry_run",
-    name="Dry run",
-    type=bool,
     default=True,
 )
-def dhis2_ewars_push(extract_pyramids, extract_all_ewars, date_start, date_end, dry_run):
+def dhis2_ewars_push(extract_pyramids, extract_all_ewars):
     """
     Pipeline to push dataElements to DHIS2
     """
+    config = load_config()
+    valid_config = validate_config(config)
     ewars = get_ewars()
     dhis2_snis = get_dhis2("drc-snis")
     dhis_nmdr = get_dhis2("dhis2-nmdr-drc")
@@ -59,12 +39,70 @@ def dhis2_ewars_push(extract_pyramids, extract_all_ewars, date_start, date_end, 
     dhis2_pyramid = get_dhis2_pyramid(extract_pyramids, dhis2_snis)
     full_pyramid = match_pyramid(df_ewars=ewars_pyramid, df_dhis2=dhis2_pyramid, extract_pyramids=extract_pyramids)
     check_pyramid(full_pyramid)
-    list_dates = get_list_dates(date_start, date_end)
+    list_dates = get_list_dates(valid_config)
     ewars_extract_list = extract_ewars_forms(list_dates, ewars, extract_all_ewars)
     ewars_extract_concat = concat_ewars_forms(ewars_extract_list)
     ewars_formated = format_ewars_extract(ewars_extract_concat, full_pyramid)
     ewars_dhis2 = put_dhis2_format(ewars_formated)
-    summary = push_data_elements(dhis_nmdr, ewars_dhis2, dry_run)
+    summary = push_data_elements(dhis_nmdr, ewars_dhis2, valid_config)
+
+
+@dhis2_ewars_push.task
+def load_config():
+    """
+    Load the configuration from the config file.
+    """
+    current_run.log_info("Loading the configuration...")
+    with open(f"{workspace.files_path}/pipelines/dhis2_ewars_push/config/config_ewars_push.json", "r") as f:
+        config = json.load(f)
+
+    return config
+
+
+@dhis2_ewars_push.task
+def validate_config(config: dict):
+    """
+    Validate the configuration.
+
+    Parameters
+    ----------
+    config : dict
+        The configuration dictionary.
+
+    Returns
+    -------
+    dict
+        The validated configuration.
+    """
+    current_run.log_info("Validating the configuration...")
+    if not isinstance(config, dict):
+        raise ValueError("The configuration must be a dictionary.")
+
+    required_keys = ["NUMBER_MONTHS_WINDOW", "STARTDATE", "ENDDATE", "DRY_RUN"]
+    for key in required_keys:
+        if key not in config:
+            raise ValueError(f"The configuration is missing the required key: {key}")
+
+    start = config.get("STARTDATE", None)
+    end = config.get("ENDDATE", None)
+    number_months = config.get("NUMBER_MONTHS_WINDOW", 4)
+
+    if start is None:
+        if end is None:
+            config["ENDDATE"] = datetime.now()
+            config["STARTDATE"] = config["ENDDATE"] - timedelta(days=30 * number_months)
+        else:
+            config["STARTDATE"] = datetime.strptime(str(end), "%Y%m%d") - timedelta(days=30 * number_months)
+            config["ENDDATE"] = datetime.strptime(str(end), "%Y%m%d")
+    else:
+        if end is None:
+            config["ENDDATE"] = datetime.strptime(str(start), "%Y%m%d") + timedelta(days=30 * number_months)
+            config["STARTDATE"] = datetime.strptime(str(start), "%Y%m%d")
+        else:
+            config["STARTDATE"] = datetime.strptime(str(start), "%Y%m%d")
+            config["ENDDATE"] = datetime.strptime(str(end), "%Y%m%d")
+
+    return config
 
 
 @dhis2_ewars_push.task
@@ -275,25 +313,23 @@ def check_pyramid(pyramid: pd.DataFrame):
 
 
 @dhis2_ewars_push.task
-def get_list_dates(date_start: int, date_end: int):
+def get_list_dates(config: dict):
     """
     Get the list of dates. For the start, we use the start of the epi-week of the date_start.
     For the end, we use the end of the epi-week of the date_end.
 
     Parameters
     ----------
-    date_start : int
-        The start date in the format DDMMYYYY.
-    date_end : int
-        The end date in the format DDMMYYYY.
+    config: dict
+        The configuration dictionary containing the start and end dates.
 
     Returns
     -------
     list
         The list of dates between date_start and date_end.
     """
-    start_date = datetime.strptime(str(date_start), "%Y%m%d")
-    end_date = datetime.strptime(str(date_end), "%Y%m%d")
+    start_date = config["STARTDATE"]
+    end_date = config["ENDDATE"]
 
     start_date_epi = get_beginning_of_epi_week(start_date)
     end_date_epi = get_beginning_of_epi_week(end_date) + timedelta(days=6)
@@ -805,7 +841,7 @@ def get_dhis2(con_name: str = "drc"):
 def push_data_elements(
     dhis2_client: DHIS2,
     data_elements_list: list,
-    dry_run: bool,
+    config: dict,
     strategy: str = "CREATE_AND_UPDATE",
     max_post: int = 1000,
 ) -> dict:
@@ -821,6 +857,8 @@ def push_data_elements(
         "import_options": {},
         "ERRORS": [],
     }
+
+    dry_run = config.get("dry_run", True)
 
     total_datapoints = len(data_elements_list)
     count = 0
