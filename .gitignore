@@ -1,5 +1,6 @@
 workspace/
 workspace.yaml
+.vscode/
 
 .DS_Store
 
