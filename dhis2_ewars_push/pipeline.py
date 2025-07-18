@@ -30,36 +30,45 @@ def dhis2_ewars_push(extract_pyramids, extract_all_ewars):
     """
     Pipeline to push dataElements to DHIS2
     """
-    config = load_config()
-    valid_config = validate_config(config)
-    ewars = get_ewars()
-    dhis2_snis = get_dhis2("drc-snis")
-    dhis_nmdr = get_dhis2("dhis2-nmdr-drc")
-    ewars_pyramid = get_ewars_pyramid(extract_pyramids, ewars)
-    dhis2_pyramid = get_dhis2_pyramid(extract_pyramids, dhis2_snis)
-    full_pyramid = match_pyramid(df_ewars=ewars_pyramid, df_dhis2=dhis2_pyramid, extract_pyramids=extract_pyramids)
-    check_pyramid(full_pyramid)
-    list_dates = get_list_dates(valid_config)
-    ewars_extract_list = extract_ewars_forms(list_dates, ewars, extract_all_ewars)
-    ewars_extract_concat = concat_ewars_forms(ewars_extract_list)
-    ewars_formated = format_ewars_extract(ewars_extract_concat, full_pyramid)
-    ewars_dhis2 = put_dhis2_format(ewars_formated)
-    summary = push_data_elements(dhis_nmdr, ewars_dhis2, valid_config)
+    try:
+        config_push = load_config()
+        config_push = validate_config(config_push)
+        ewars = get_ewars()
+        dhis2_snis = get_dhis2("drc-snis")
+        dhis_nmdr = get_dhis2("dhis2-nmdr-drc")
+        ewars_pyramid = get_ewars_pyramid(extract_pyramids, ewars)
+        dhis2_pyramid = get_dhis2_pyramid(extract_pyramids, dhis2_snis)
+        full_pyramid = match_pyramid(df_ewars=ewars_pyramid, df_dhis2=dhis2_pyramid, extract_pyramids=extract_pyramids)
+        check_pyramid(full_pyramid)
+        list_dates = get_list_dates(config_push)
+        ewars_extract_list = extract_ewars_forms(list_dates, ewars, extract_all_ewars)
+        ewars_extract_concat = concat_ewars_forms(ewars_extract_list)
+        ewars_formated = format_ewars_extract(ewars_extract_concat, full_pyramid)
+        ewars_dhis2 = put_dhis2_format(ewars_formated)
+        summary = push_data_elements(dhis_nmdr, ewars_dhis2, config_push)
+    except Exception as e:
+        current_run.log_error(f"An error occurred: {e}")
+        raise e
 
 
-@dhis2_ewars_push.task
 def load_config():
     """
     Load the configuration from the config file.
     """
-    current_run.log_info("Loading the configuration...")
-    with open(f"{workspace.files_path}/pipelines/dhis2_ewars_push/config/config_ewars_push.json", "r") as f:
-        config = json.load(f)
+    try:
+        with open(f"{workspace.files_path}/pipelines/dhis2_ewars_push/config/config_ewars_push.json", "r") as f:
+            config = json.load(f)
 
-    return config
+        current_run.log_info("Configuration loaded.")
+        return config
+    except FileNotFoundError as e:
+        raise FileNotFoundError(f"The file '{file_path}' was not found {e}") from e
+    except json.JSONDecodeError as e:
+        raise json.JSONDecodeError(f"Error decoding JSON: {e}") from e
+    except Exception as e:
+        raise Exception(f"An error occurred while loading the configuration: {e}") from e
 
 
-@dhis2_ewars_push.task
 def validate_config(config: dict):
     """
     Validate the configuration.
@@ -105,7 +114,6 @@ def validate_config(config: dict):
     return config
 
 
-@dhis2_ewars_push.task
 def put_dhis2_format(ewars_extract: pd.DataFrame):
     """
     Adapt the Ewars data to a format we can push to DHIS2.
@@ -142,7 +150,6 @@ def put_dhis2_format(ewars_extract: pd.DataFrame):
     return values_to_post
 
 
-@dhis2_ewars_push.task
 def get_ewars_pyramid(extract_pyramids: bool, ewars: EWARSClient):
     """
     Get the ewars pyramid, either from a file or by extracting it from the API.
@@ -158,19 +165,22 @@ def get_ewars_pyramid(extract_pyramids: bool, ewars: EWARSClient):
     pd.DataFrame
         The cleaned ewars pyramid.
     """
-    path_pyramid = f"{workspace.files_path}/pipelines/dhis2_ewars_push/raw/pyramids/ewars_pyramid.parquet"
-    if extract_pyramids or not os.path.exists(path_pyramid):
-        ewars_pyramid = extract_ewars_pyramid(ewars)
+    try:
         path_pyramid = f"{workspace.files_path}/pipelines/dhis2_ewars_push/raw/pyramids/ewars_pyramid.parquet"
-        ewars_pyramid.to_parquet(path_pyramid)
-    else:
-        ewars_pyramid = pd.read_parquet(path_pyramid)
-        current_run.log_info("Using the already extracted ewars pyramid")
+        if extract_pyramids or not os.path.exists(path_pyramid):
+            ewars_pyramid = extract_ewars_pyramid(ewars)
+            path_pyramid = f"{workspace.files_path}/pipelines/dhis2_ewars_push/raw/pyramids/ewars_pyramid.parquet"
+            ewars_pyramid.to_parquet(path_pyramid)
+        else:
+            ewars_pyramid = pd.read_parquet(path_pyramid)
+            current_run.log_info("Using the already extracted ewars pyramid")
 
-    return ewars_pyramid
+        return ewars_pyramid
+    except Exception as e:
+        current_run.log_error(f"An error occurred while getting the ewars pyramid: {e}")
+        raise e
 
 
-@dhis2_ewars_push.task
 def get_dhis2_pyramid(extract_pyramids: bool, dhis2: DHIS2):
     """
     Get the DHIS2 pyramid, either from a file or by extracting it from the API.
@@ -188,19 +198,22 @@ def get_dhis2_pyramid(extract_pyramids: bool, dhis2: DHIS2):
     pd.DataFrame
         The cleaned DHIS2 pyramid.
     """
-    path_pyramid = f"{workspace.files_path}/pipelines/dhis2_ewars_push/raw/pyramids/dhis2_pyramid.parquet"
-    if extract_pyramids or not os.path.exists(path_pyramid):
-        dhis2_pyramid = extract_dhis2_pyramid(dhis2)
+    try:
         path_pyramid = f"{workspace.files_path}/pipelines/dhis2_ewars_push/raw/pyramids/dhis2_pyramid.parquet"
-        dhis2_pyramid.to_parquet(path_pyramid)
-    else:
-        dhis2_pyramid = pd.read_parquet(path_pyramid)
-        current_run.log_info("Using the already extracted DHIS2 pyramid")
+        if extract_pyramids or not os.path.exists(path_pyramid):
+            dhis2_pyramid = extract_dhis2_pyramid(dhis2)
+            path_pyramid = f"{workspace.files_path}/pipelines/dhis2_ewars_push/raw/pyramids/dhis2_pyramid.parquet"
+            dhis2_pyramid.to_parquet(path_pyramid)
+        else:
+            dhis2_pyramid = pd.read_parquet(path_pyramid)
+            current_run.log_info("Using the already extracted DHIS2 pyramid")
 
-    return dhis2_pyramid
+        return dhis2_pyramid
+    except Exception as e:
+        current_run.log_error(f"An error occurred while getting the DHIS2 pyramid: {e}")
+        raise e
 
 
-@dhis2_ewars_push.task
 def match_pyramid(df_ewars: pd.DataFrame, df_dhis2: pd.DataFrame, extract_pyramids: bool):
     """
     Match the ewars and dhis2 pyramids.
@@ -280,7 +293,6 @@ def match_pyramid(df_ewars: pd.DataFrame, df_dhis2: pd.DataFrame, extract_pyrami
     return df_match
 
 
-@dhis2_ewars_push.task
 def check_pyramid(pyramid: pd.DataFrame):
     """
     Some checks on the pyramid.
@@ -312,7 +324,6 @@ def check_pyramid(pyramid: pd.DataFrame):
         repeated_ewars_id.to_parquet(path_ewars_repeated)
 
 
-@dhis2_ewars_push.task
 def get_list_dates(config: dict):
     """
     Get the list of dates. For the start, we use the start of the epi-week of the date_start.
@@ -339,7 +350,6 @@ def get_list_dates(config: dict):
     return list_dates
 
 
-@dhis2_ewars_push.task
 def extract_ewars_forms(list_dates: list, ewars: EWARSClient, extract_all_ewars: bool):
     list_ewars_forms = []
     for date in list_dates:
@@ -365,7 +375,6 @@ def extract_ewars_forms(list_dates: list, ewars: EWARSClient, extract_all_ewars:
     return list_ewars_forms
 
 
-@dhis2_ewars_push.task
 def concat_ewars_forms(list_ewars_forms: list):
     """
     Concatenate the ewars forms.
@@ -386,7 +395,6 @@ def concat_ewars_forms(list_ewars_forms: list):
     return ewars
 
 
-@dhis2_ewars_push.task
 def format_ewars_extract(ewars_not_melted: pd.DataFrame, full_pyramid: pd.DataFrame):
     """
     Format the ewars extract.
@@ -827,7 +835,6 @@ def clean_ous_names(
     return unidecode(cleaned).casefold().upper().strip()
 
 
-@dhis2_ewars_push.task
 def get_dhis2(con_name: str = "drc"):
     """
     Get the DHIS2 instance from the API.
@@ -837,7 +844,6 @@ def get_dhis2(con_name: str = "drc"):
     return DHIS2(con_dhis)
 
 
-@dhis2_ewars_push.task
 def push_data_elements(
     dhis2_client: DHIS2,
     data_elements_list: list,
@@ -918,17 +924,20 @@ def push_data_elements(
     return summary
 
 
-@dhis2_ewars_push.task
 def get_ewars(con_name: str = "ewars"):
     """
     Get the EWARS instance from the API.
     """
-    ewars_conn = workspace.custom_connection(con_name)
-    ewars_client = EWARSClient(
-        user=ewars_conn.user, password=ewars_conn.password, aid=ewars_conn.aid, client=ewars_conn.client
-    )
-    current_run.log_info("Connected to the EWARS instance.")
-    return ewars_client
+    try:
+        ewars_conn = workspace.custom_connection(con_name)
+        ewars_client = EWARSClient(
+            user=ewars_conn.user, password=ewars_conn.password, aid=ewars_conn.aid, client=ewars_conn.client
+        )
+        current_run.log_info("Connected to the EWARS instance.")
+        return ewars_client
+    except Exception as e:
+        current_run.log_error(f"Failed to connect to the EWARS instance: {e}")
+        raise
 
 
 def extract_ewars_pyramid(ewars: EWARSClient):
