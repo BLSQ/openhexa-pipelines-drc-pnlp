@@ -5,6 +5,7 @@ from dateutil.relativedelta import relativedelta
 from io import BytesIO
 from math import ceil
 from pathlib import Path
+from epiweeks import Week
 
 import geopandas as gpd
 from openhexa.sdk import (
@@ -19,7 +20,7 @@ from openhexa.sdk.datasets import DatasetFile
 from openhexa.toolbox.era5.cds import CDS, VARIABLES
 
 
-@pipeline("__pipeline_id__", name="era5_temperature_extract")
+@pipeline("era5_temperature_extract")
 @parameter(
     "start_date",
     type=str,
@@ -95,9 +96,12 @@ def era5_temperature_extract(
     current_run.log_info(f"Using area of interest: {bounds}")
 
     if not end_date:
-        # end_date = datetime.now().astimezone(timezone.utc).strftime("%Y-%m-%d")
-        # Let's set the end date to the last day of the previous month
-        end_date = (datetime.now().astimezone(timezone.utc).replace(day=1) - relativedelta(days=1)).strftime("%Y-%m-%d")
+        # We compute the end date as the last day of the previous week (ERA5 refresh: 6 days-1)
+        end_date = (
+            Week.fromdate(datetime.now().astimezone(timezone.utc) - relativedelta(days=5))
+            .daydate()
+            .strftime("%Y-%m-%d")
+        )
         current_run.log_info(f"End date set to {end_date}")
 
     output_dir = Path(workspace.files_path, output_dir)
@@ -236,8 +240,8 @@ def download(
         current_run.log_error(msg)
         raise ValueError(msg)
 
-    start = datetime.strptime(start, "%Y-%m-%d").astimezone(timezone.utc)
-    end = datetime.strptime(end, "%Y-%m-%d").astimezone(timezone.utc)
+    start = datetime.strptime(start, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    end = datetime.strptime(end, "%Y-%m-%d").replace(tzinfo=timezone.utc)
 
     dst_dir = output_dir / variable
     dst_dir.mkdir(parents=True, exist_ok=True)
