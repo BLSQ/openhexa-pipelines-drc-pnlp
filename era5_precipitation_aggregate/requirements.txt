@@ -1,5 +1,6 @@
-openhexa.toolbox @ git+https://github.com/BLSQ/openhexa-toolbox@main
+# openhexa.toolbox @ git+https://github.com/BLSQ/openhexa-toolbox@main
+openhexa.toolbox==2.8.2
 cfgrib
 xarray
-epiweeks
+# epiweeks
 psycopg2-binary

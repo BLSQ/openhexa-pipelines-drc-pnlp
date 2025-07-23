@@ -5,7 +5,7 @@ from dateutil.relativedelta import relativedelta
 from io import BytesIO
 from math import ceil
 from pathlib import Path
-from epiweeks import Week
+from epiweek import EpiWeek
 
 import geopandas as gpd
 from openhexa.sdk import (
@@ -96,12 +96,11 @@ def era5_temperature_extract(
     current_run.log_info(f"Using area of interest: {bounds}")
 
     if not end_date:
-        # We compute the end date as the last day of the previous week (ERA5 refresh: 6 days-1)
-        end_date = (
-            Week.fromdate(datetime.now().astimezone(timezone.utc) - relativedelta(days=5))
-            .daydate()
-            .strftime("%Y-%m-%d")
-        )
+        # RUN pipeline extract every sunday with a week delay
+        # We compute the end date as the last day of 2 weeks ago (ERA5 refresh: 6 days)
+        # day = datetime.strptime("2025-07-20", "%Y-%m-%d") - relativedelta(days=8)  # manual
+        day = datetime.now() - relativedelta(days=8)  # End date of 1 full week ago
+        end_date = EpiWeek(day).end.strftime("%Y-%m-%d")
         current_run.log_info(f"End date set to {end_date}")
 
     output_dir = Path(workspace.files_path, output_dir)

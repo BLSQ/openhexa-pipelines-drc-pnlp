@@ -16,11 +16,7 @@ from openhexa.sdk.datasets import DatasetFile
 from sqlalchemy import create_engine
 from epiweek import EpiWeek
 import fsspec
-from openhexa.toolbox.era5.aggregate import (
-    build_masks,
-    get_transform,
-    merge,
-)
+from openhexa.toolbox.era5.aggregate import build_masks, get_transform, merge
 from openhexa.toolbox.era5.cds import VARIABLES
 
 
@@ -30,14 +26,14 @@ from openhexa.toolbox.era5.cds import VARIABLES
     type=str,
     name="Input directory",
     help="Input directory with raw ERA5 extracts",
-    default="data/era5/raw",
+    default="pipelines/era5_precipitation_extract/data/raw",
 )
 @parameter(
     "output_dir",
     type=str,
     name="Output directory",
     help="Output directory for the aggregated data",
-    default="data/era5/aggregate",
+    default="pipelines/era5_precipitation_aggregate/data/aggregate",
 )
 def era5_aggregate(
     input_dir: str,
@@ -57,21 +53,26 @@ def era5_aggregate(
 
     # load boundaries
     # boundaries = load_boundaries(db_table="cod_iaso_zone_de_sante")
+    current_run.log_info("Loading boundaries from 'zones-de-sante-boundaries' dataset")
     boundaries = read_boundaries(workspace.get_dataset("zones-de-sante-boundaries"), "zs_boundaries.gpkg")
     # boundaries = gpd.read_file(Path(workspace.files_path) / "zs_boundaries.gpkg")  # local tests
 
+    current_run.log_info("Starting ERA5 precipitation daily aggregation")
     df_daily = aggregate_ERA5_data_daily(
         input_dir=input_dir,
         boundaries=boundaries,
         output_dir=output_dir,
     )
 
+    current_run.log_info("Starting ERA5 precipitation weekly aggregation")
     df_weekly = weekly(
         df=df_daily,
         dst_file=(output_dir / "total_precipitation_weekly.parquet").as_posix(),
     )
 
-    df_monthly = monthly(
+    current_run.log_info("Starting ERA5 precipitation monthly aggregation")
+    # df_monthly
+    _ = monthly(
         df=df_daily,
         dst_file=(output_dir / "total_precipitation_monthly.parquet").as_posix(),
     )
@@ -213,7 +214,6 @@ def get_merged_dataset(input_dir: Path) -> pl.DataFrame:
                 copyfile(src=file.as_posix(), dst=Path(tmpdir, file.name).as_posix())
 
         ds = merge(Path(tmpdir))
-
         # remove all non-precipitation variables.. merge is selecting maximum value
         # ds = ds.dropna(dim="time", subset=["tp"])  # for temperature variable is called "t2m"
 
