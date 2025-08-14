@@ -478,6 +478,7 @@ def remove_unwanted_locations(ewars_extract: pl.DataFrame):
         current_run.log_info(
             f"I have removed {removed_repeated.height} locations that were not correctly matched from the ewars extract."
         )
+        dt = datetime.now().strftime("%Y%m%d_%H%M%S")
         path = (
             f"{workspace.files_path}/pipelines/dhis2_ewars_push/processed/repeated_values/repeated_removed_{dt}.parquet"
         )
