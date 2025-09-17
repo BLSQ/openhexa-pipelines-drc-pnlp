@@ -159,7 +159,6 @@ class EWARSClient:
             if not resp_value:
                 return pd.DataFrame()
             reports_df = pd.json_normalize(resp_value)
-            "data"
             reports_df.columns = self.clean_strings(input_list=reports_df.columns)
             reports_df.columns = reports_df.columns.str.replace("^data_", "", regex=True)  # remove extra "data_"
             return reports_df
