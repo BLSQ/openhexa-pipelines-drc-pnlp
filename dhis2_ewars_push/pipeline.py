@@ -283,7 +283,9 @@ def match_pyramid(df_ewars: pd.DataFrame, df_dhis2: pd.DataFrame, extract_pyrami
             f"Some ewars names could not be matched with the maximum threshold {threshold}. I have saved them in a CSV file."
         )
         dt = datetime.now().strftime("%Y%m%d_%H%M%S")
-        path_df_no_match = f"{workspace.files_path}/pipelines/dhis2_ewars_push/processed/not_matched/ewars_data_not_matched_{dt}.parquet"
+        output_path = f"{workspace.files_path}/pipelines/dhis2_ewars_push/processed/not_matched"
+        os.makedirs(output_path, exist_ok=True)
+        path_df_no_match = f"{output_path}/ewars_data_not_matched_{dt}.parquet"
         df_ewars_to_be_matched.to_parquet(path_df_no_match)
 
     df_match = pd.concat(list_match, ignore_index=True)
@@ -309,18 +311,18 @@ def check_pyramid(pyramid: pd.DataFrame):
             f"Some DHIS2 level 4 ids are duplicated in the pyramid. {len(unique_pairs)} duplicates found."
         )
         dt = datetime.now().strftime("%Y%m%d_%H%M%S")
-        path_dhis2_repeated = (
-            f"{workspace.files_path}/pipelines/dhis2_ewars_push/processed/repeated_values/dhis2_repeated_{dt}.parquet"
-        )
+        output_path = f"{workspace.files_path}/pipelines/dhis2_ewars_push/processed/repeated_values"
+        os.makedirs(output_path, exist_ok=True)
+        path_dhis2_repeated = f"{output_path}/dhis2_repeated_{dt}.parquet"
         unique_pairs.to_parquet(path_dhis2_repeated)
     if not repeated_ewars_id.empty:
         current_run.log_error(
             f"Some EWARS level 4 ids are duplicated in the pyramid. {len(repeated_ewars_id)} duplicates found."
         )
         dt = datetime.now().strftime("%Y%m%d_%H%M%S")
-        path_ewars_repeated = (
-            f"{workspace.files_path}/pipelines/dhis2_ewars_push/processed/repeated_values/ewars_repeated_{dt}.parquet"
-        )
+        output_path = f"{workspace.files_path}/pipelines/dhis2_ewars_push/processed/repeated_values"
+        os.makedirs(output_path, exist_ok=True)
+        path_ewars_repeated = f"{output_path}/ewars_repeated_{dt}.parquet"
         repeated_ewars_id.to_parquet(path_ewars_repeated)
 
 
@@ -356,7 +358,9 @@ def extract_ewars_forms(list_dates: list, ewars: EWARSClient, extract_all_ewars:
         date_str = date.strftime("%Y-%m-%d")
         current_run.log_info(f"Extracting the ewars form {config.form_id} for the date {date_str}")
         file_name = f"form-{config.form_id}_date-{date_str}.parquet"
-        path_file = f"{workspace.files_path}/pipelines/dhis2_ewars_push/raw/ewars_forms/{file_name}"
+        output_path = f"{workspace.files_path}/pipelines/dhis2_ewars_push/raw/ewars_forms"
+        os.makedirs(output_path, exist_ok=True)
+        path_file = f"{output_path}/{file_name}"
 
         if os.path.exists(path_file) and not extract_all_ewars:
             current_run.log_info(f"File {file_name} already exists. Skipping the extraction.")
@@ -366,7 +370,8 @@ def extract_ewars_forms(list_dates: list, ewars: EWARSClient, extract_all_ewars:
         else:
             ewars_form = ewars.get_reports_for_date(config.form_id, date_str)
             if not ewars_form.empty:
-                ewars_form = ewars_form.drop(columns=["history"])
+                ewars_form = ewars_form.drop(columns=["history", "source"])
+                # Source column is repeated -- we are not interested on it, we drop it
                 ewars_form.to_parquet(path_file)
                 list_ewars_forms.append(ewars_form)
             else:
@@ -448,9 +453,9 @@ def format_ewars_extract(ewars_not_melted: pd.DataFrame, full_pyramid: pd.DataFr
     # ewars_extract = ewars_extract[config.ewars_formated_cols]
 
     dt = datetime.now().strftime("%Y%m%d_%H%M%S")
-    path_ewars_extract = (
-        f"{workspace.files_path}/pipelines/dhis2_ewars_push/processed/ewars_forms/ewars_extract_{dt}.parquet"
-    )
+    output_path = f"{workspace.files_path}/pipelines/dhis2_ewars_push/processed/ewars_forms"
+    os.makedirs(output_path, exist_ok=True)
+    path_ewars_extract = f"{output_path}/ewars_extract_{dt}.parquet"
     ewars_extract.to_parquet(path_ewars_extract)
 
     return ewars_extract
@@ -478,6 +483,7 @@ def remove_unwanted_locations(ewars_extract: pl.DataFrame):
         current_run.log_info(
             f"I have removed {removed_repeated.height} locations that were not correctly matched from the ewars extract."
         )
+        dt = datetime.now().strftime("%Y%m%d_%H%M%S")
         path = (
             f"{workspace.files_path}/pipelines/dhis2_ewars_push/processed/repeated_values/repeated_removed_{dt}.parquet"
         )
@@ -541,9 +547,9 @@ def look_at_value_col(ewars_extract: pl.DataFrame):
     ewars_weird = pl.concat([ewars_non_numeric, ewars_multiple_zeros, ewars_non_integers, ewars_big_values])
     if ewars_weird.height > 0:
         dt = datetime.now().strftime("%Y%m%d_%H%M%S")
-        path = (
-            f"{workspace.files_path}/pipelines/dhis2_ewars_push/processed/strange_ewars_values/strange_ewars_{dt}.csv"
-        )
+        output_path = f"{workspace.files_path}/pipelines/dhis2_ewars_push/processed/strange_ewars_values"
+        os.makedirs(output_path, exist_ok=True)
+        path = f"{output_path}/strange_ewars_{dt}.csv"
         ewars_weird.write_csv(path)
 
     return ewars_numeric
