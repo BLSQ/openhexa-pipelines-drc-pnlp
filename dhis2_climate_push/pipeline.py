@@ -23,7 +23,6 @@ def dhis2_climate_push():
     """
     current_run.log_info("Starting climate pipeline...")
     root_path = Path(workspace.files_path) / "pipelines" / "dhis2_climate_push"
-    configure_login(logs_path=root_path / "logs", task_name="climateData")
 
     try:
         # Load the pipeline configuration
@@ -109,12 +108,12 @@ def push_organisation_units(root: Path, dhis2_client_target: DHIS2, config: dict
     The format of the pyramid contains the expected columns. A dataframe that doesn't contain the
     mandatory columns will be skipped (not valid).
     """
-
     if not run_task:
         return True
 
     current_run.log_info("Starting organisation units push.")
-    report_path = root / "logs"
+    report_path = root / "logs" / "org_units"
+    configure_logging(logs_path=report_path, task_name="climate_data_org_units")
 
     # WE ALIGN ONLY THE ZONES DE SANTE USED FOR CLIMATE METRICS.
     # Load pyramid from boundaries DB table (cod_iaso_zone_de_sante)
@@ -204,7 +203,8 @@ def precipitation_push(pipeline_path: Path, dhis2_client_target: DHIS2, config: 
     """Put some data processing code here."""
 
     current_run.log_info("Precipitation data push started...")
-    report_path = pipeline_path / "logs"
+    report_path = pipeline_path / "logs" / "precipitation"
+    configure_logging(logs_path=report_path, task_name="push_data")
 
     # Parameters for the import
     import_strategy = config["CLIMATE_PUSH_SETTINGS"].get("IMPORT_STRATEGY", None)
@@ -279,6 +279,9 @@ def precipitation_push(pipeline_path: Path, dhis2_client_target: DHIS2, config: 
         current_run.log_info(
             f"Pushing precipitation data with parameters import_strategy: {import_strategy}, dry_run: {dry_run}, max_post: {max_post}"
         )
+        logging.info(
+            f"Pushing precipitation data with parameters import_strategy: {import_strategy}, dry_run: {dry_run}, max_post: {max_post}"
+        )
         summary = push_data_elements(
             dhis2_client=dhis2_client_target,
             data_elements_list=datapoints_valid,
@@ -316,7 +319,8 @@ def tempareture_min_push(pipeline_path: Path, dhis2_client_target: DHIS2, config
     """Put some data processing code here."""
 
     current_run.log_info("Temperature min data push started...")
-    report_path = pipeline_path / "logs"
+    report_path = pipeline_path / "logs" / "temperature_min"
+    configure_logging(logs_path=report_path, task_name="push_temp_min")
 
     # Parameters for the import
     import_strategy = config["CLIMATE_PUSH_SETTINGS"].get("IMPORT_STRATEGY", None)
@@ -404,6 +408,9 @@ def tempareture_min_push(pipeline_path: Path, dhis2_client_target: DHIS2, config
 
         # push data
         current_run.log_info(
+            f"Pushing Temperature min data with parameters import_strategy: {import_strategy}, dry_run: {dry_run}, max_post: {max_post}"
+        )
+        logging.info(
             f"Pushing Temperature min data with parameters import_strategy: {import_strategy}, dry_run: {dry_run}, max_post: {max_post}"
         )
         summary = push_data_elements(
@@ -648,7 +655,8 @@ def tempareture_max_push(pipeline_path: Path, dhis2_client_target: DHIS2, config
     """Put some data processing code here."""
 
     current_run.log_info("Temperature max data push started...")
-    report_path = pipeline_path / "logs"
+    report_path = pipeline_path / "logs" / "temperature_max"
+    configure_logging(logs_path=report_path, task_name="push_temp_max")
 
     # Parameters for the import
     import_strategy = config["CLIMATE_PUSH_SETTINGS"].get("IMPORT_STRATEGY", None)
@@ -738,6 +746,9 @@ def tempareture_max_push(pipeline_path: Path, dhis2_client_target: DHIS2, config
         current_run.log_info(
             f"Pushing Temperature max data with parameters import_strategy: {import_strategy}, dry_run: {dry_run}, max_post: {max_post}"
         )
+        logging.info(
+            f"Pushing Temperature max data with parameters import_strategy: {import_strategy}, dry_run: {dry_run}, max_post: {max_post}"
+        )
         summary = push_data_elements(
             dhis2_client=dhis2_client_target,
             data_elements_list=datapoints_valid,
@@ -775,7 +786,8 @@ def relative_humidity_push(pipeline_path: Path, dhis2_client_target: DHIS2, conf
     """Put some data processing code here."""
 
     current_run.log_info("Relative humidity data push started...")
-    report_path = pipeline_path / "logs"
+    report_path = pipeline_path / "logs" / "relative_humidity"
+    configure_logging(logs_path=report_path, task_name="push_humidity")
 
     # Parameters for the import
     import_strategy = config["CLIMATE_PUSH_SETTINGS"].get("IMPORT_STRATEGY", None)
@@ -865,6 +877,9 @@ def relative_humidity_push(pipeline_path: Path, dhis2_client_target: DHIS2, conf
         current_run.log_info(
             f"Pushing relative humidity data with parameters import_strategy: {import_strategy}, dry_run: {dry_run}, max_post: {max_post}"
         )
+        logging.info(
+            f"Pushing relative humidity data with parameters import_strategy: {import_strategy}, dry_run: {dry_run}, max_post: {max_post}"
+        )
         summary = push_data_elements(
             dhis2_client=dhis2_client_target,
             data_elements_list=datapoints_valid,
@@ -902,18 +917,6 @@ def load_climate_data(table_name: str) -> pd.DataFrame:
     dbengine = create_engine(os.environ["WORKSPACE_DATABASE_URL"])
     data = pd.read_sql_table(table_name, con=dbengine)
     return data
-
-
-def configure_login(logs_path: Path, task_name: str):
-    logs_path.mkdir(parents=True, exist_ok=True)
-
-    # Configure logging
-    now = datetime.now().strftime("%Y-%m-%d-%H_%M")
-    logging.basicConfig(
-        filename=logs_path / f"{task_name}_{now}.log",
-        level=logging.INFO,
-        format="%(asctime)s - %(message)s",
-    )
 
 
 def to_dhis2_format_precipitation(
@@ -1538,6 +1541,28 @@ def log_ignored(report_path, datapoint_list, data_type="precipitation", is_na=Fa
         logging.warning(f"{len(datapoint_list)} {data_type} datapoints to be ignored: ")
         for i, error in enumerate(datapoint_list, start=1):
             logging.warning(f"{i} DataElement {'NA' if is_na else ''} ignored: {error}")
+
+
+def configure_logging(logs_path: Path, task_name: str):
+    """Configure logging for the pipeline.
+
+    Parameters
+    ----------
+    logs_path : Path
+        Directory path where log files will be stored.
+    task_name : str
+        Name of the task to include in the log filename.
+
+    This function creates the log directory if it does not exist and sets up logging to a file.
+    """
+    # Configure logging
+    logs_path.mkdir(parents=True, exist_ok=True)
+    now = datetime.now().strftime("%Y-%m-%d-%H_%M")
+    logging.basicConfig(
+        filename=logs_path / f"{task_name}_{now}.log",
+        level=logging.INFO,
+        format="%(asctime)s - %(message)s",
+    )
 
 
 if __name__ == "__main__":
