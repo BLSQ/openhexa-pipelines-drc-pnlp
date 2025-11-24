@@ -362,18 +362,18 @@ def pnlp_dse_database_push(pipeline_path: str, dhis2_client_target: DHIS2, confi
         log_summary_errors(summary)
 
         # Check if all data points were correctly imported by DHIS2
-        dp_ignored = summary["import_counts"]["ignored"]
-        if dp_ignored > 0:
-            current_run.log_warning(
-                f"{dp_ignored} datapoints not imported. dse_database last push date is not updated: {last_pushed_date}"
-            )
-        else:
-            # Save the last date pushed for Temperature max
-            total_dp = summary["import_counts"]["imported"] + summary["import_counts"]["updated"]
-            current_run.log_info(f"{total_dp} datapoints correctly processed.")
-            # current_run.log_info(f"All {len(datapoints_valid)} datapoints correctly imported.")
-            # Save the last date pushed for DSE db
-            update_last_available_date_log(os.path.join(pipeline_path, "config"), "dse_database", dse_date_max)
+        # dp_ignored = summary["import_counts"]["ignored"]
+        # if dp_ignored > 0:
+        #     current_run.log_warning(
+        #         f"{dp_ignored} datapoints not imported. dse_database last push date is not updated: {last_pushed_date}"
+        #     )
+        # else:
+        # Save the last date pushed for Temperature max
+        total_dp = summary["import_counts"]["imported"] + summary["import_counts"]["updated"]
+        current_run.log_info(f"{total_dp} datapoints correctly processed.")
+        # current_run.log_info(f"All {len(datapoints_valid)} datapoints correctly imported.")
+        # Save the last date pushed for DSE db
+        update_last_available_date_log(os.path.join(pipeline_path, "config"), "dse_database", dse_date_max)
         return True
 
     except Exception as e:
@@ -513,18 +513,18 @@ def pnlp_completude_push(pipeline_path: str, dhis2_client_target: DHIS2, config:
         log_summary_errors(summary)
 
         # Check if all data points were correctly imported by DHIS2
-        dp_ignored = summary["import_counts"]["ignored"]
-        if dp_ignored > 0:
-            current_run.log_warning(
-                f"{dp_ignored} datapoints not imported. dse_completude last push date is not updated: {last_date_pushed}"
-            )
-        else:
-            # Save the last date pushed for Temperature max
-            total_dp = summary["import_counts"]["imported"] + summary["import_counts"]["updated"]
-            current_run.log_info(f"{total_dp} datapoints correctly processed.")
-            # current_run.log_info(f"All {len(datapoints_valid)} datapoints correctly imported.")
-            # Save the last date pushed for DSE db
-            update_last_available_date_log(os.path.join(pipeline_path, "config"), "dse_completude", dse_date_max)
+        # dp_ignored = summary["import_counts"]["ignored"]
+        # if dp_ignored > 0:
+        #     current_run.log_warning(
+        #         f"{dp_ignored} datapoints not imported. dse_completude last push date is not updated: {last_date_pushed}"
+        #     )
+        # else:
+        # Save the last date pushed for Temperature max
+        total_dp = summary["import_counts"]["imported"] + summary["import_counts"]["updated"]
+        current_run.log_info(f"{total_dp} datapoints correctly processed.")
+        # current_run.log_info(f"All {len(datapoints_valid)} datapoints correctly imported.")
+        # Save the last date pushed for DSE db
+        update_last_available_date_log(os.path.join(pipeline_path, "config"), "dse_completude", dse_date_max)
 
         return True
     except Exception as e:
