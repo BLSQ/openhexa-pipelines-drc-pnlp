@@ -3,6 +3,7 @@ import logging
 from datetime import datetime
 from pathlib import Path
 import time
+import shutil
 import pandas as pd
 
 # import polars as pl
@@ -22,6 +23,7 @@ from utils import (
     retrieve_ou_list,
     save_to_parquet,
     split_list,
+    configure_logging_flush,
 )
 
 
@@ -109,9 +111,7 @@ def sync_organisation_units(
             connection_str=config_push["SETTINGS"]["DHIS2_CONNECTION"], cache_dir=pipeline_path / "data" / "cache"
         )
 
-        extract_pyramid(
-            pipeline_path=pipeline_path, dhis2_client=dhis2_client_source, output_dir=pipeline_path / "data" / "pyramid"
-        )
+        extract_pyramid(dhis2_client=dhis2_client_source, output_dir=pipeline_path / "data" / "pyramid")
 
         # sync pyramid data to target
         sync_pyramid_with(pipeline_path=pipeline_path, dhis2_client=dhis2_client_target, dry_run=dry_run)
@@ -218,6 +218,7 @@ def push_extracts(
     current_run.log_info("Data elements push task started.")
 
     # load configuration
+    logger, logs_file = configure_logging_flush(logs_path=Path("/home/jovyan/tmp/logs"), task_name="push_des")
     config = load_configuration(config_path=pipeline_path / "config" / "push_config.json")
 
     # connect to target DHIS2 instance
@@ -239,7 +240,7 @@ def push_extracts(
     push_wait = config["SETTINGS"].get("PUSH_WAIT", 5)  # Default to 5 minutes
 
     # log parameters
-    logging.info(f"Import strategy: {import_strategy} - Dry Run: {dry_run} - Max Post elements: {max_post}")
+    logger.info(f"Import strategy: {import_strategy} - Dry Run: {dry_run} - Max Post elements: {max_post}")
     current_run.log_info(
         f"Pushing data elements with parameters import_strategy: {import_strategy}, dry_run: {dry_run}, max_post: {max_post}"
     )
@@ -301,12 +302,16 @@ def push_extracts(
             datapoints_valid, datapoints_not_valid, datapoints_to_na = select_transform_to_json(data_values=df)
 
             # log not valid datapoints
-            log_ignored_or_na(report_path=pipeline_path / "logs", datapoint_list=datapoints_not_valid)
+            log_ignored_or_na(report_path=pipeline_path / "logs", datapoint_list=datapoints_not_valid, logger=logger)
 
             # datapoints set to NA
             if len(datapoints_to_na) > 0:
                 log_ignored_or_na(
-                    report_path=pipeline_path / "logs", datapoint_list=datapoints_to_na, data_type="extract", is_na=True
+                    report_path=pipeline_path / "logs",
+                    datapoint_list=datapoints_to_na,
+                    logger=logger,
+                    data_type="extract",
+                    is_na=True,
                 )
                 summary_na = push_data_elements(
                     dhis2_client=dhis2_client_target,
@@ -319,8 +324,8 @@ def push_extracts(
                 # log info
                 msg = f"Data elements delete summary:  {summary_na['import_counts']}"
                 current_run.log_info(msg)
-                logging.info(msg)
-                log_summary_errors(summary_na)
+                logger.info(msg)
+                log_summary_errors(summary_na, logger=logger)
 
             current_run.log_info(f"Pushing {len(datapoints_valid)} valid data elements for period {next_period}.")
             # push data
@@ -339,16 +344,27 @@ def push_extracts(
             # log info
             msg = f"Analytics extracts summary for period {next_period}: {summary['import_counts']}"
             current_run.log_info(msg)
-            logging.info(msg)
-            log_summary_errors(summary)
+            logger.info(msg)
+            log_summary_errors(summary, logger=logger)
 
         current_run.log_info("No more extracts to push.")
 
     except Exception as e:
         raise Exception(f"Analytic extracts task error: {e}")
+    finally:
+        push_queue.enqueue("FINISH")
+        save_logs(logs_file, output_dir=pipeline_path / "logs" / "push")
 
 
-def extract_pyramid(pipeline_path: Path, dhis2_client: DHIS2, output_dir: Path) -> None:
+def save_logs(logs_file: Path, output_dir: Path) -> None:
+    """Moves all .log files from logs_path to output_dir."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    if logs_file.is_file():
+        dest_file = output_dir / logs_file.name
+        shutil.copy(logs_file.as_posix(), dest_file.as_posix())
+
+
+def extract_pyramid(dhis2_client: DHIS2, output_dir: Path) -> None:
     """Extracts the SNIS DHIS2 pyramid data and saves it as a Parquet file."""
     current_run.log_info("Retrieving SNIS DHIS2 pyramid data")
 
@@ -379,6 +395,8 @@ def extract_pyramid(pipeline_path: Path, dhis2_client: DHIS2, output_dir: Path) 
 def sync_pyramid_with(pipeline_path: Path, dhis2_client: DHIS2, dry_run: bool) -> None:
     current_run.log_info("Starting organisation units sync.")
 
+    # set logger
+    logger, logs_file = configure_logging_flush(logs_path=Path("/home/jovyan/tmp/logs"), task_name="org_units_sync")
     # Load pyramid extract
     orgUnit_source = read_parquet_extract(pipeline_path / "data" / "pyramid" / "pyramid_data.parquet")
     current_run.log_debug(f"Shape source pyramid: {orgUnit_source.shape}")
@@ -411,10 +429,12 @@ def sync_pyramid_with(pipeline_path: Path, dhis2_client: DHIS2, dry_run: bool) -
                     ou_df=ou_to_create,
                     dhis2_client_target=dhis2_client,
                     dry_run=dry_run,
-                    report_path=pipeline_path / "logs",
+                    logger=logger,
                 )
         except Exception as e:
             raise Exception(f"Unexpected error occurred while creating organisation units. Error: {e}") from e
+        finally:
+            save_logs(logs_file, output_dir=pipeline_path / "logs" / "org_units_sync")
 
         # Update orgUnits
         try:
@@ -431,17 +451,19 @@ def sync_pyramid_with(pipeline_path: Path, dhis2_client: DHIS2, dry_run: bool) -
                     matching_ou_ids=ou_matching,
                     dhis2_client_target=dhis2_client,
                     dry_run=dry_run,
-                    report_path=pipeline_path / "logs",
+                    logger=logger,
                 )
                 current_run.log_info("Organisation units push finished.")
         except Exception as e:
             raise Exception(f"Unexpected error occurred while updating organisation units. Error: {e}") from e
+        finally:
+            save_logs(logs_file, output_dir=pipeline_path / "logs" / "org_units_sync")
 
     else:
         current_run.log_warning("No data found in the pyramid file. Organisation units task skipped.")
 
 
-def push_orgunits_create(ou_df: pd.DataFrame, dhis2_client_target: DHIS2, dry_run: bool, report_path: str):
+def push_orgunits_create(ou_df: pd.DataFrame, dhis2_client_target: DHIS2, dry_run: bool, logger: logging.Logger):
     errors_count = 0
     for _, row in ou_df.iterrows():
         ou = OrgUnitObj(row)
@@ -454,11 +476,11 @@ def push_orgunits_create(ou_df: pd.DataFrame, dhis2_client_target: DHIS2, dry_ru
             )
             if response["status"] == "ERROR":
                 errors_count = errors_count + 1
-                logging.info(str(response))
+                logger.info(str(response))
             else:
                 current_run.log_info(f"New organisation unit created: {ou}")
         else:
-            logging.info(
+            logger.info(
                 str(
                     {
                         "action": "CREATE",
@@ -472,7 +494,7 @@ def push_orgunits_create(ou_df: pd.DataFrame, dhis2_client_target: DHIS2, dry_ru
 
     if errors_count > 0:
         current_run.log_info(
-            f"{errors_count} errors occurred during creation. Please check the latest execution report under {report_path}."
+            f"{errors_count} errors occurred during creation. Please check the latest execution reports"
         )
 
 
@@ -482,7 +504,7 @@ def push_orgunits_update(
     matching_ou_ids: list,
     dhis2_client_target: DHIS2,
     dry_run: bool,
-    report_path: str,
+    logger: logging.Logger,
 ):
     """
     Update org units based matching id list
@@ -528,7 +550,7 @@ def push_orgunits_update(
                 errors_count = errors_count + 1
             else:
                 updates_count = updates_count + 1
-            logging.info(str(response))
+            logger.info(str(response))
 
         if progress_count % 5000 == 0:
             current_run.log_info(f"Organisation units checked: {progress_count}/{len(matching_ou_ids)}")
@@ -536,7 +558,7 @@ def push_orgunits_update(
     current_run.log_info(f"Organisation units updated: {updates_count}")
     if errors_count > 0:
         current_run.log_info(
-            f"{errors_count} errors occurred during OU update. Please check the latest execution report under {report_path}."
+            f"{errors_count} errors occurred during OU update. Please check the latest execution reports."
         )
 
 
@@ -831,14 +853,14 @@ def select_transform_to_json(data_values: pd.DataFrame):
     return valid, not_valid, to_delete
 
 
-def log_ignored_or_na(report_path, datapoint_list, data_type="population", is_na=False):
+def log_ignored_or_na(report_path, datapoint_list, logger: logging.Logger, data_type="population", is_na=False):
     if len(datapoint_list) > 0:
         current_run.log_info(
             f"{len(datapoint_list)} datapoints will be  {'updated to NA' if is_na else 'ignored'}. Please check the report for details {report_path}"
         )
-        logging.warning(f"{len(datapoint_list)} {data_type} datapoints to be ignored: ")
+        logger.warning(f"{len(datapoint_list)} {data_type} datapoints to be ignored: ")
         for i, ignored in enumerate(datapoint_list, start=1):
-            logging.warning(f"{i} DataElement {'NA' if is_na else ''} ignored: {ignored}")
+            logger.warning(f"{i} DataElement {'NA' if is_na else ''} ignored: {ignored}")
 
 
 def push_data_elements(
@@ -946,7 +968,7 @@ def get_response_value_errors(response, chunk):
         return None
 
 
-def log_summary_errors(summary: dict):
+def log_summary_errors(summary: dict, logger: logging.Logger) -> None:
     """
     Logs all the errors in the summary dictionary using the configured logging.
 
@@ -955,20 +977,20 @@ def log_summary_errors(summary: dict):
     """
     errors = summary.get("ERRORS", [])
     if not errors:
-        logging.info("No errors found in the summary.")
+        logger.info("No errors found in the summary.")
     else:
-        logging.error(f"Logging {len(errors)} error(s) from export summary.")
+        logger.error(f"Logging {len(errors)} error(s) from export summary.")
         # for i, error in enumerate(errors, start=1):
         #     logging.error(f"Error {i}: {error}")
         #         logging.error(f"Logging {len(errors)} error(s) from export summary.")
         for i_e, error in enumerate(errors, start=1):
-            logging.error(f"Error {i_e} : HTTP request failed : {error.get('error', None)}")
+            logger.error(f"Error {i_e} : HTTP request failed : {error.get('error', None)}")
             error_response = error.get("response", None)
             if error_response:
                 rejected_list = error_response.pop("rejected_datapoints", [])
-                logging.error(f"Error response : {error_response}")
+                logger.error(f"Error response : {error_response}")
                 for i_r, rejected in enumerate(rejected_list, start=1):
-                    logging.error(f"Rejected data point {i_r}: {rejected}")
+                    logger.error(f"Rejected data point {i_r}: {rejected}")
 
 
 if __name__ == "__main__":
