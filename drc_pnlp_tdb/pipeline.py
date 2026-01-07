@@ -1,4 +1,3 @@
-# import os
 from pathlib import Path
 import pandas as pd
 import polars as pl
@@ -107,7 +106,7 @@ def retrieve_routine_data(
             # check if all the data elements are present
             not_found = set(monitored_des) - set(extract["dx_uid"].unique().tolist())
             if not_found:
-                current_run.log_debug(f"Data elements not found in period {p} : {not_found}.")
+                current_run.log_warning(f"Data elements not found in period {p} : {not_found}.")
             loaded_extracts.append(extract)
     if not loaded_extracts:
         current_run.log_info(f"No extracts found for the period: {period}.")
@@ -190,7 +189,7 @@ def retrieve_acm_data(
             # check if all the data elements are present
             not_found = set(acm_indicator_id) - set(extract["dx_uid"].unique().tolist())
             if not_found:
-                current_run.log_debug(f"ACM not found in period {p} : {acm_indicator_id}.")
+                current_run.log_warning(f"ACM not found in period {p} : {acm_indicator_id}.")
             loaded_extracts.append(extract)
 
     if not loaded_extracts:
@@ -267,7 +266,7 @@ def retrieve_reporting_data(
             # check if all the data elements are present
             not_found = set(reporting_datasets) - set(extract["dx_uid"].unique().tolist())
             if not_found:
-                current_run.log_debug(f"Reporting rates not found in period {p} : {not_found}.")
+                current_run.log_warning(f"Reporting rates not found in period {p} : {not_found}.")
             loaded_extracts.append(extract)
 
     if not loaded_extracts:
@@ -448,7 +447,7 @@ def month_to_quarter(num):
     - num (int) : a given month in DHIS format (e.g. 201808)
     Returns: (str) the quarter corresponding to the given month (e.g. Q3)
     """
-    y = num // 100
+    # y = num // 100
     m = num % 100
     return "Q" + str((m - 1) // 3 + 1)
 
