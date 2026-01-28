@@ -37,7 +37,6 @@ def dhis2_climate_push():
         # THIS PIPELINE WILL MAKE THE ALIGNMENT USING THAT UPDATED TABLE
 
         # NOTE: we could implement a check at the begining to execute only when there is new data..
-        # Align pyramid
         push_organisation_units(
             root=root_path,
             dhis2_client_target=dhis2_client,
@@ -63,6 +62,7 @@ def dhis2_climate_push():
 
     except Exception as e:
         current_run.log_error(f"An error occurred: {e}")
+        raise
 
 
 def load_climate_config(pipeline_path: Path) -> dict:
@@ -1321,8 +1321,7 @@ def push_data_elements(
 
         except requests.exceptions.RequestException as e:
             try:
-                # response = r.json().get("response")
-                response = r.json().get("response") if r else None
+                response = r.json().get("response") if r is not None else None
             except (ValueError, AttributeError) as un_err:
                 response = None
                 raise Exception(f"Unexpected error. Pipeline halted: {un_err} ")
@@ -1335,7 +1334,7 @@ def push_data_elements(
             summary["ERRORS"].append({"error": e, "response": error_response})
 
             # Stop the pipeline if the we have a server error.
-            if 500 <= response["httpStatusCode"] < 600:
+            if response is not None and 500 <= response.get("httpStatusCode", 0) < 600:
                 raise Exception(
                     f"Server error pipeline halted: {e} - {error_response} summary: {summary['import_counts']}"
                 )
