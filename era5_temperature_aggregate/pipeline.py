@@ -15,7 +15,6 @@ import numpy as np
 from openhexa.sdk import Dataset, current_run, parameter, pipeline, workspace
 from openhexa.sdk.datasets import DatasetFile
 from sqlalchemy import create_engine
-from epiweek import EpiWeek
 import fsspec
 from openhexa.toolbox.era5.aggregate import (
     build_masks,
@@ -60,11 +59,11 @@ def era5_aggregate(
     # load boundaries
     # boundaries = load_boundaries(db_table="cod_iaso_zone_de_sante")
     boundaries = read_boundaries(workspace.get_dataset("zones-de-sante-boundaries"), "zs_boundaries.gpkg")
+    # boundaries = gpd.read_file(Path(workspace.files_path) / "zs_boundaries.gpkg")  # local tests
 
     calculate_aggregations(boundaries, input_dir, output_dir)
 
 
-@era5_aggregate.task
 def calculate_aggregations(boundaries, input_dir, output_dir):
     """
     Calculate the daily, weekly and montly temperature aggregations.
@@ -176,8 +175,6 @@ def update_temperature_dataset(df: pd.DataFrame, agg_func: str, version):
     except Exception as e:
         current_run.log_error(f"Dataset file cannot be saved - ERROR: {e}")
         raise
-
-    current_run.log_info(f"New dataset version {date_version} created")
 
     return version
 
@@ -411,6 +408,22 @@ def filesystem(target_path: str, cache_dir: str = None) -> fsspec.AbstractFileSy
         return fsspec.filesystem(protocol=target_protocol, client_kwargs=client_kwargs)
 
 
+def iso_week_bounds(date_str: str):
+    d = datetime.strptime(date_str, "%Y-%m-%d")
+    iso = d.isocalendar()
+
+    # ISO week start (Monday)
+    start = datetime.fromisocalendar(iso.year, iso.week, 1)
+
+    # ISO week end (Sunday)
+    end = datetime.fromisocalendar(iso.year, iso.week, 7)
+
+    # Mid date (Thursday is ISO middle of week)
+    mid = datetime.fromisocalendar(iso.year, iso.week, 4)
+
+    return start.date(), end.date(), mid.date()
+
+
 def get_weekly_aggregates(df: pd.DataFrame, agg_func: str) -> pd.DataFrame:
     """Apply weekly aggregation of input daily dataframe.
 
@@ -434,17 +447,21 @@ def get_weekly_aggregates(df: pd.DataFrame, agg_func: str) -> pd.DataFrame:
     # using ISO week date system
     df_["epi_year"] = df_["period"].apply(lambda day: datetime.strptime(day, "%Y-%m-%d").isocalendar()[0]).astype(int)
     df_["epi_week"] = df_["period"].apply(lambda day: datetime.strptime(day, "%Y-%m-%d").isocalendar()[1]).astype(int)
+    # Epiweek (legacy)
     # df_["epi_year"] = df_["period"].apply(lambda day: EpiWeek(datetime.strptime(day, "%Y-%m-%d")).year).astype(int)
     # df_["epi_week"] = df_["period"].apply(lambda day: EpiWeek(datetime.strptime(day, "%Y-%m-%d")).week).astype(int)
 
-    # Epiweek start end dates
-    df_["start_date"] = df_["period"].apply(lambda day: EpiWeek(datetime.strptime(day, "%Y-%m-%d")).start).astype(str)
-    df_["end_date"] = df_["period"].apply(lambda day: EpiWeek(datetime.strptime(day, "%Y-%m-%d")).end).astype(str)
-    df_["middle_date"] = (
-        df_["period"]
-        .apply(lambda day: _compute_mid_date(EpiWeek(datetime.strptime(day, "%Y-%m-%d"))))
-        .dt.date.astype(str)
-    )
+    # Start, end, mid dates ISO
+    df_["start_date"], df_["end_date"], df_["middle_date"] = zip(*df_["period"].apply(iso_week_bounds))
+
+    # Epiweek start end dates (legacy)
+    # df_["start_date"] = df_["period"].apply(lambda day: EpiWeek(datetime.strptime(day, "%Y-%m-%d")).start).astype(str)
+    # df_["end_date"] = df_["period"].apply(lambda day: EpiWeek(datetime.strptime(day, "%Y-%m-%d")).end).astype(str)
+    # df_["middle_date"] = (
+    #     df_["period"]
+    #     .apply(lambda day: _compute_mid_date(EpiWeek(datetime.strptime(day, "%Y-%m-%d"))))
+    #     .dt.date.astype(str)
+    # )
 
     # epiweek aggregation with the agg
     aggregations = (
@@ -567,10 +584,6 @@ def get_monthly_aggregates(df: pd.DataFrame, agg_func: str) -> pd.DataFrame:
         ]
     ]
     return merged_df
-
-
-def _compute_mid_date(epiweek: EpiWeek) -> datetime:
-    return epiweek.start + (epiweek.end - epiweek.start) / 2
 
 
 if __name__ == "__main__":
