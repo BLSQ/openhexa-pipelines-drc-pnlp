@@ -45,8 +45,8 @@ def era5_aggregate(
     input_dir: str,
     output_dir: str,
 ):
-    input_dir = Path(workspace.files_path, input_dir)
-    output_dir = Path(workspace.files_path, output_dir)
+    input_dir = Path(workspace.files_path) / input_dir
+    output_dir = Path(workspace.files_path) / output_dir
 
     # subdirs containing raw data are named after variable names
     subdirs = [d for d in input_dir.iterdir() if d.is_dir()]
@@ -431,8 +431,11 @@ def get_weekly_aggregates(df: pd.DataFrame, agg_func: str) -> pd.DataFrame:
     """
 
     df_ = df.copy()
-    df_["epi_year"] = df_["period"].apply(lambda day: EpiWeek(datetime.strptime(day, "%Y-%m-%d")).year).astype(int)
-    df_["epi_week"] = df_["period"].apply(lambda day: EpiWeek(datetime.strptime(day, "%Y-%m-%d")).week).astype(int)
+    # using ISO week date system
+    df_["epi_year"] = df_["period"].apply(lambda day: datetime.strptime(day, "%Y-%m-%d").isocalendar()[0]).astype(int)
+    df_["epi_week"] = df_["period"].apply(lambda day: datetime.strptime(day, "%Y-%m-%d").isocalendar()[1]).astype(int)
+    # df_["epi_year"] = df_["period"].apply(lambda day: EpiWeek(datetime.strptime(day, "%Y-%m-%d")).year).astype(int)
+    # df_["epi_week"] = df_["period"].apply(lambda day: EpiWeek(datetime.strptime(day, "%Y-%m-%d")).week).astype(int)
 
     # Epiweek start end dates
     df_["start_date"] = df_["period"].apply(lambda day: EpiWeek(datetime.strptime(day, "%Y-%m-%d")).start).astype(str)
@@ -456,7 +459,8 @@ def get_weekly_aggregates(df: pd.DataFrame, agg_func: str) -> pd.DataFrame:
         }
     )
     data_left = df_.copy()
-    data_left["period"] = data_left["period"].apply(lambda day: str(EpiWeek(datetime.strptime(day, "%Y-%m-%d"))))
+    # data_left["period"] = data_left["period"].apply(lambda day: str(EpiWeek(datetime.strptime(day, "%Y-%m-%d"))))
+    data_left["period"] = data_left["epi_year"].astype(str) + "W" + data_left["epi_week"].astype(str).str.zfill(2)
     data_left = data_left.drop(columns=[f"t{agg_func}"])
     data_left = data_left.drop_duplicates(subset=data_left.columns)  # unique rows
 

@@ -39,8 +39,8 @@ def era5_aggregate(
     input_dir: str,
     output_dir: str,
 ):
-    input_dir = Path(workspace.files_path, input_dir)
-    output_dir = Path(workspace.files_path, output_dir)
+    input_dir = Path(workspace.files_path) / input_dir
+    output_dir = Path(workspace.files_path) / output_dir
 
     # subdirs containing raw data are named after variable names
     subdirs = [d for d in input_dir.iterdir() if d.is_dir()]
@@ -396,6 +396,12 @@ def get_weekly_aggregates(df: pd.DataFrame) -> pd.DataFrame:
     dataframe
         Weekly dataframe of length (n_features * n_weeks)
     """
+    df_ = df.copy()
+    # use ISO format for DHIS2 imports (weeks starting on Monday)
+    df_["epi_year"] = df_["period"].apply(lambda day: datetime.strptime(day, "%Y-%m-%d").isocalendar()[0]).astype(int)
+    df_["epi_week"] = df_["period"].apply(lambda day: datetime.strptime(day, "%Y-%m-%d").isocalendar()[1]).astype(int)
+    # df_["epi_year"] = df_["period"].apply(lambda day: EpiWeek(datetime.strptime(day, "%Y-%m-%d")).year).astype(int)
+    # df_["epi_week"] = df_["period"].apply(lambda day: EpiWeek(datetime.strptime(day, "%Y-%m-%d")).week).astype(int)
 
     df_ = df.copy()
     df_["epi_year"] = df_["period"].apply(lambda day: EpiWeek(datetime.strptime(day, "%Y-%m-%d")).year).astype(int)
