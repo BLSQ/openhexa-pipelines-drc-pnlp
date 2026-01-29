@@ -14,7 +14,8 @@ import numpy as np
 from openhexa.sdk import Dataset, current_run, parameter, pipeline, workspace
 from openhexa.sdk.datasets import DatasetFile
 from sqlalchemy import create_engine
-from epiweek import EpiWeek
+
+# from epiweek import EpiWeek
 import fsspec
 from openhexa.toolbox.era5.aggregate import build_masks, get_transform, merge
 from openhexa.toolbox.era5.cds import VARIABLES
@@ -224,6 +225,47 @@ def get_merged_dataset(input_dir: Path) -> pl.DataFrame:
     return ds
 
 
+# This is a WINDOWS version to use locally
+# def spatial_aggregation(
+#     ds: xr.Dataset,
+#     dst_file: str,
+#     boundaries: gpd.GeoDataFrame,
+# ) -> pd.DataFrame:
+#     """Apply spatial aggregation on dataset based on a set of boundaries."""
+
+#     current_run.log_info("Running spatial aggregation ...")
+
+#     df = _spatial_aggregation(ds=ds, boundaries=boundaries)
+#     current_run.log_info(f"Applied spatial aggregation for {len(boundaries)} boundaries")
+
+#     fs = filesystem(dst_file)
+
+#     # Create Windows-safe temp file
+#     fd, tmp_path = tempfile.mkstemp(suffix=".parquet")
+#     os.close(fd)  # VERY IMPORTANT on Windows
+
+#     try:
+#         # Write parquet
+#         df.to_parquet(tmp_path)
+
+#         # Upload to OpenHEXA / S3 / GCS / local fs
+#         fs.put(tmp_path, dst_file)
+
+#     finally:
+#         # Always cleanup
+#         if os.path.exists(tmp_path):
+#             os.remove(tmp_path)
+
+#     # Only register output if running inside OpenHEXA
+#     try:
+#         current_run.add_file_output(dst_file)
+#     except KeyError:
+#         # Not running in OpenHEXA (Windows local)
+#         pass
+
+#     return df
+
+
 def spatial_aggregation(
     ds: xr.Dataset,
     dst_file: str,
@@ -380,6 +422,18 @@ def monthly(df: pd.DataFrame, dst_file: str) -> pd.DataFrame:
     return df_monthly
 
 
+def iso_week_bounds(date_str: str):
+    d = datetime.strptime(date_str, "%Y-%m-%d")
+    iso = d.isocalendar()
+
+    start = datetime.fromisocalendar(iso.year, iso.week, 1)  # ISO week start (Monday)
+    end = datetime.fromisocalendar(iso.year, iso.week, 7)  # ISO week end (Sunday)
+    mid = datetime.fromisocalendar(iso.year, iso.week, 4)  # Mid date (Thursday is ISO middle of week)
+
+    # start and end as strings
+    return start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"), mid.date()
+
+
 def get_weekly_aggregates(df: pd.DataFrame) -> pd.DataFrame:
     """Apply weekly aggregation of input daily dataframe.
 
@@ -403,19 +457,19 @@ def get_weekly_aggregates(df: pd.DataFrame) -> pd.DataFrame:
     # df_["epi_year"] = df_["period"].apply(lambda day: EpiWeek(datetime.strptime(day, "%Y-%m-%d")).year).astype(int)
     # df_["epi_week"] = df_["period"].apply(lambda day: EpiWeek(datetime.strptime(day, "%Y-%m-%d")).week).astype(int)
 
-    df_ = df.copy()
-    df_["epi_year"] = df_["period"].apply(lambda day: EpiWeek(datetime.strptime(day, "%Y-%m-%d")).year).astype(int)
-    df_["epi_week"] = df_["period"].apply(lambda day: EpiWeek(datetime.strptime(day, "%Y-%m-%d")).week).astype(int)
+    # Start, end, mid dates ISO
+    df_["start_date"], df_["end_date"], df_["mid_date"] = zip(*df_["period"].apply(iso_week_bounds))
 
     # Epiweek start end dates
-    df_["start_date"] = df_["period"].apply(lambda day: EpiWeek(datetime.strptime(day, "%Y-%m-%d")).start).astype(str)
-    df_["end_date"] = df_["period"].apply(lambda day: EpiWeek(datetime.strptime(day, "%Y-%m-%d")).end).astype(str)
-    df_["mid_date"] = df_["period"].apply(lambda day: _compute_mid_date(EpiWeek(datetime.strptime(day, "%Y-%m-%d"))))
+    # df_["start_date"] = df_["period"].apply(lambda day: EpiWeek(datetime.strptime(day, "%Y-%m-%d")).start).astype(str)
+    # df_["end_date"] = df_["period"].apply(lambda day: EpiWeek(datetime.strptime(day, "%Y-%m-%d")).end).astype(str)
+    # df_["mid_date"] = df_["period"].apply(lambda day: _compute_mid_date(EpiWeek(datetime.strptime(day, "%Y-%m-%d"))))
 
     # epiweek aggregation sum
     sums = df_.groupby(by=["ref", "epi_year", "epi_week"])[["sum"]].sum().reset_index()
     data_left = df_.copy()
-    data_left["period"] = data_left["period"].apply(lambda day: str(EpiWeek(datetime.strptime(day, "%Y-%m-%d"))))
+    data_left["period"] = data_left["epi_year"].astype(str) + "W" + data_left["epi_week"].astype(str).str.zfill(2)
+    # data_left["period"] = data_left["period"].apply(lambda day: str(EpiWeek(datetime.strptime(day, "%Y-%m-%d"))))
     data_left = data_left.drop(columns=["sum"])
     data_left = data_left.drop_duplicates(subset=data_left.columns)  # unique rows
 
@@ -516,10 +570,6 @@ def get_monthly_aggregates(df: pd.DataFrame) -> pd.DataFrame:
     ]
 
     return merged_df
-
-
-def _compute_mid_date(epiweek: EpiWeek) -> datetime:
-    return epiweek.start + (epiweek.end - epiweek.start) / 2
 
 
 if __name__ == "__main__":
