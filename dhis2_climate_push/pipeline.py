@@ -296,18 +296,16 @@ def precipitation_push(pipeline_path: Path, dhis2_client_target: DHIS2, config: 
         log_summary_errors(summary)
 
         # Check if all data points were correctly imported by DHIS2
-        # dp_ignored = summary["import_counts"]["ignored"]
-        # if dp_ignored > 0:
-        #     current_run.log_warning(
-        #         f"{dp_ignored} datapoints not imported. precipitation last push date is not updated: {last_pushed_date}"
-        #     )
-        # else:
-        # Save the last date pushed for Temperature min
-        total_dp = summary["import_counts"]["imported"] + summary["import_counts"]["updated"]
+        dp_ignored = summary["import_counts"].get("ignored", 0)
+        if dp_ignored > 0:
+            current_run.log_warning(f"{dp_ignored} datapoints ignored.")
+
+        total_dp = summary["import_counts"].get("imported", 0) + summary["import_counts"].get("updated", 0)
         current_run.log_info(f"{total_dp} datapoints correctly processed.")
-        # current_run.log_info(f"All {len(datapoints_valid)} datapoints correctly imported.")
+
         # Save the last date pushed for precipitation
-        update_last_available_date_log(pipeline_path / "config", "precipitation", precip_date_max)
+        if total_dp != 0:
+            update_last_available_date_log(pipeline_path / "config", "precipitation", precip_date_max)
 
         return True
 
@@ -428,18 +426,16 @@ def tempareture_min_push(pipeline_path: Path, dhis2_client_target: DHIS2, config
         log_summary_errors(summary)
 
         # Check if all data points were correctly imported by DHIS2
-        # dp_ignored = summary["import_counts"]["ignored"]
-        # if dp_ignored > 0:
-        #     current_run.log_warning(
-        #         f"{dp_ignored} datapoints not imported. tempearture_min last push date is not updated: {last_pushed_date}"
-        #     )
-        # else:
-        # Save the last date pushed for Temperature min
-        total_dp = summary["import_counts"]["imported"] + summary["import_counts"]["updated"]
+        dp_ignored = summary["import_counts"].get("ignored", 0)
+        if dp_ignored > 0:
+            current_run.log_warning(f"{dp_ignored} datapoints ignored.")
+
+        total_dp = summary["import_counts"].get("imported", 0) + summary["import_counts"].get("updated", 0)
         current_run.log_info(f"{total_dp} datapoints correctly processed.")
-        # current_run.log_info(f"All {len(datapoints_valid)} datapoints correctly imported.")
-        # Save the last date pushed for Temperature min
-        update_last_available_date_log(pipeline_path / "config", "temperature_min", temp_min_date_max)
+
+        # Save the last date pushed for temp min
+        if total_dp != 0:
+            update_last_available_date_log(pipeline_path / "config", "temperature_min", temp_min_date_max)
 
         return True
 
@@ -764,18 +760,16 @@ def tempareture_max_push(pipeline_path: Path, dhis2_client_target: DHIS2, config
         log_summary_errors(summary)
 
         # Check if all data points were correctly imported by DHIS2
-        # dp_ignored = summary["import_counts"]["ignored"]
-        # if dp_ignored > 0:
-        #     current_run.log_warning(
-        #         f"{dp_ignored} datapoints not imported. tempearture_max last push date is not updated: {last_pushed_date}"
-        #     )
-        # else:
-        # Save the last date pushed for Temperature max
-        total_dp = summary["import_counts"]["imported"] + summary["import_counts"]["updated"]
-        current_run.log_info(f"{total_dp} datapoints correctly processed.")
-        # current_run.log_info(f"All {len(datapoints_valid)} datapoints correctly imported.")
-        update_last_available_date_log(os.path.join(pipeline_path, "config"), "temperature_max", temp_max_date_max)
+        dp_ignored = summary["import_counts"].get("ignored", 0)
+        if dp_ignored > 0:
+            current_run.log_warning(f"{dp_ignored} datapoints ignored.")
 
+        total_dp = summary["import_counts"].get("imported", 0) + summary["import_counts"].get("updated", 0)
+        current_run.log_info(f"{total_dp} datapoints correctly processed.")
+
+        # Save the last date pushed for temp max
+        if total_dp != 0:
+            update_last_available_date_log(pipeline_path / "config", "temperature_max", temp_max_date_max)
         return True
 
     except Exception as e:
@@ -895,17 +889,16 @@ def relative_humidity_push(pipeline_path: Path, dhis2_client_target: DHIS2, conf
         log_summary_errors(summary)
 
         # Check if all data points were correctly imported by DHIS2
-        # dp_ignored = summary["import_counts"]["ignored"]
-        # if dp_ignored > 0:
-        #     current_run.log_warning(
-        #         f"{dp_ignored} datapoints not imported. relative_humity last push date is not updated: {last_pushed_date}"
-        #     )
-        # else:
-        # Save the last date pushed for Temperature max
-        total_dp = summary["import_counts"]["imported"] + summary["import_counts"]["updated"]
+        dp_ignored = summary["import_counts"].get("ignored", 0)
+        if dp_ignored > 0:
+            current_run.log_warning(f"{dp_ignored} datapoints ignored.")
+
+        total_dp = summary["import_counts"].get("imported", 0) + summary["import_counts"].get("updated", 0)
         current_run.log_info(f"{total_dp} datapoints correctly processed.")
-        # current_run.log_info(f"All {len(datapoints_valid)} datapoints correctly imported.")
-        update_last_available_date_log(pipeline_path / "config", "relative_humidity", relative_humidity_date_max)
+
+        # Save the last date pushed for humidity
+        if total_dp != 0:
+            update_last_available_date_log(pipeline_path / "config", "relative_humidity", relative_humidity_date_max)
 
     except Exception as e:
         raise Exception(f"An error occurred while pushing relative humidity max data: {e}") from e
