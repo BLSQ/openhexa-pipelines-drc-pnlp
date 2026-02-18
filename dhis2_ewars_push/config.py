@@ -23,6 +23,7 @@ ewars_level4_replacements = {
         "MALUKU 1": {
             "KINGANKATI  1": "KINGANKATI",
         },
+        "N'SELE": {"MBANGUMBAMU": "UNKNOWN"},  # We dont want to match it wrongly to BAHUMBU 1
     },
     "KWILU": {
         "KIKWIT NORD": {"MARCHE": "MARCHE KIKWIT 3"},
@@ -35,6 +36,23 @@ ewars_level4_replacements = {
         "MUBUMBANO": {"MUZINZI": "MUZINZI DE MUBUMBANO", "IBANDA": "IBANDA DE MUBUMBANO"},
         "NUNDU": {"IAMBA": "IAMBA /MAKOBOLA2"},
         "KIMBI LULENGE": {"SUNGWE": "SUNGWE DE KIMBI LULENGE"},
+    },
+    "KONGO CENTRAL": {
+        "BOKO KIVULU": {"TEMBO": "UNKNOWN"},  # We dont want to match it wrongly to NDEMBO
+        "GOMBE MATADI": {"KINKUZU": "UNKNOWN"},  # We dont want to match it wrongly to NKAZU
+    },
+    "NORD KIVU": {
+        "KIBUA": {
+            "KAILENGE": "UNKNOWN",  # We dont want to match it wrongly to KILUNGU
+            "MIKUMBI": "UNKNOWN",  # We dont want to match it wrongly to MACHUMBI
+            "MIRUTA": "UNKNOWN",  # We dont want to match it wrongly to MWITWA
+        },
+        "RUTSHURU": {
+            "KATORO": "UNKNOWN",  # We dont want to match it wrongly to KAKOMERO
+        },
+    },
+    "LOMAMI": {
+        "MWENE DITU": {"TSHISHINJI": "UNKNOWN"},  # We dont want to match it wrongly to CINSIHNJI
     },
 }
 ewars_level3_replacements_somelevel4 = {
