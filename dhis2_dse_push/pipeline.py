@@ -15,7 +15,7 @@ from openhexa.toolbox.dhis2 import DHIS2
 import numpy as np
 
 
-@pipeline("dhis2-dse-push", name="dhis2_dse_push")
+@pipeline("dhis2-dse-push")
 def dhis2_dse_push():
     current_run.log_info("Starting DSE data pipeline...")
     root_path = os.path.join(workspace.files_path, "pipelines", "dhis2_dse_push")
