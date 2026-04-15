@@ -13,7 +13,7 @@ import pandas as pd
 import numpy as np
 from openhexa.sdk import Dataset, current_run, parameter, pipeline, workspace
 from openhexa.sdk.datasets import DatasetFile
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 
 # from epiweek import EpiWeek
 import fsspec
@@ -119,16 +119,21 @@ def aggregate_ERA5_data_daily(
 
 def upload_data_to_table(df: pd.DataFrame, targetTable: str):
     """Upload the processed precipitation data stats to target table."""
-
     current_run.log_info(f"Updating table : {targetTable}")
 
     # Create engine
     dbengine = create_engine(os.environ["WORKSPACE_DATABASE_URL"])
 
-    # Create table
-    df.to_sql(targetTable, dbengine, index=False, if_exists="replace", chunksize=4096)
-
-    del dbengine
+    try:
+        # Push the DataFrame to the DB table
+        with dbengine.begin() as conn:
+            # Truncate preserves the table structure (thus dependent views)
+            conn.execute(text(f'TRUNCATE TABLE "{targetTable}"'))
+            # Append fresh data into the now-empty table
+            df.to_sql(targetTable, conn, if_exists="append", index=False)
+    except Exception as e:
+        current_run.log_error(f"An error occurred while updating {targetTable}: {e}", "error")
+        raise
 
 
 def update_precipitation_dataset(df: pd.DataFrame):
