@@ -1,26 +1,26 @@
 import os
 import tempfile
+import warnings
 import zipfile
+from datetime import datetime
 from io import BytesIO
 from pathlib import Path
 from shutil import copyfile
-from datetime import datetime
-import warnings
 
+import fsspec
 import geopandas as gpd
+import numpy as np
+import pandas as pd
 import polars as pl
 import xarray as xr
-import pandas as pd
-import numpy as np
 from openhexa.sdk import Dataset, current_run, parameter, pipeline, workspace
 from openhexa.sdk.datasets import DatasetFile
-from sqlalchemy import create_engine, text
-import fsspec
 from openhexa.toolbox.era5.aggregate import (
     build_masks,
     get_transform,
 )
 from openhexa.toolbox.era5.cds import VARIABLES
+from sqlalchemy import create_engine, text
 
 warnings.simplefilter(action="ignore", category=FutureWarning)
 

@@ -1,24 +1,23 @@
 import os
 import tempfile
 import zipfile
+from datetime import datetime
 from io import BytesIO
 from pathlib import Path
 from shutil import copyfile
-from datetime import datetime
-
-import geopandas as gpd
-import polars as pl
-import xarray as xr
-import pandas as pd
-import numpy as np
-from openhexa.sdk import Dataset, current_run, parameter, pipeline, workspace
-from openhexa.sdk.datasets import DatasetFile
-from sqlalchemy import create_engine, text
 
 # from epiweek import EpiWeek
 import fsspec
+import geopandas as gpd
+import numpy as np
+import pandas as pd
+import polars as pl
+import xarray as xr
+from openhexa.sdk import Dataset, current_run, parameter, pipeline, workspace
+from openhexa.sdk.datasets import DatasetFile
 from openhexa.toolbox.era5.aggregate import build_masks, get_transform, merge
 from openhexa.toolbox.era5.cds import VARIABLES
+from sqlalchemy import create_engine, text
 
 
 @pipeline("ERA5_precipitation_aggregate")
