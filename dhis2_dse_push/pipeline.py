@@ -9,14 +9,21 @@ from typing import Generator
 import pandas as pd
 import requests
 from sqlalchemy import create_engine
-from openhexa.sdk import current_run, pipeline, workspace
+from openhexa.sdk import current_run, pipeline, workspace, parameter
 from openhexa.toolbox.dhis2 import DHIS2
 
 import numpy as np
 
 
 @pipeline("dhis2-dse-push")
-def dhis2_dse_push():
+@parameter(
+    "force_run",
+    name="Force run",
+    type=bool,
+    default=False,
+    help="Force run the pipeline even if no new data is available to push.",
+)
+def dhis2_dse_push(force_run: bool):
     current_run.log_info("Starting DSE data pipeline...")
     root_path = os.path.join(workspace.files_path, "pipelines", "dhis2_dse_push")
 
@@ -45,11 +52,16 @@ def dhis2_dse_push():
             dhis2_client_target=dhis2_client,
             config=pipeline_config,
             success=pyramid_ready,
+            force_run=force_run,
         )
 
         # Run completude push task
         pnlp_completude_push(
-            pipeline_path=root_path, dhis2_client_target=dhis2_client, config=pipeline_config, success=dse_db_success
+            pipeline_path=root_path,
+            dhis2_client_target=dhis2_client,
+            config=pipeline_config,
+            success=dse_db_success,
+            force_run=force_run,
         )
 
     except Exception as e:
@@ -120,6 +132,10 @@ def organisation_units_alignment(root: str, dhis2_client_target: DHIS2, config: 
         # Load DSE Database and completude to check the pyramids agains the SNIS pyramid (they should match).
         # We run the DSE process considering the SNIS pyramid in first place, so it would be rare that we might
         # have differences. But if that happens, we can handle those differences using mappings.
+        current_run.log_info(
+            f"Loading data from tables: {config['DSE_PUSH_SETTINGS']['PNLP_DSE_PALU_TABLE']} "
+            f"and {config['DSE_PUSH_SETTINGS']['PNLP_DSE_COMPLETUDE_TABLE']} to check alignment with source pyramid."
+        )
         dse_database_data = load_db_table_data(table_name=config["DSE_PUSH_SETTINGS"]["PNLP_DSE_PALU_TABLE"])
         dse_completude_data = load_db_table_data(table_name=config["DSE_PUSH_SETTINGS"]["PNLP_DSE_COMPLETUDE_TABLE"])
         dse_database_data_map = apply_source_mappings_for_dse_data(
@@ -238,7 +254,9 @@ def organisation_units_alignment(root: str, dhis2_client_target: DHIS2, config: 
 
 
 @dhis2_dse_push.task
-def pnlp_dse_database_push(pipeline_path: str, dhis2_client_target: DHIS2, config: dict, success: bool) -> bool:
+def pnlp_dse_database_push(
+    pipeline_path: str, dhis2_client_target: DHIS2, config: dict, success: bool, force_run: bool
+) -> bool:
     """Put some data processing code here."""
 
     current_run.log_info("DSE database data push started...")
@@ -274,6 +292,7 @@ def pnlp_dse_database_push(pipeline_path: str, dhis2_client_target: DHIS2, confi
             raise ValueError
 
         # Load DSE database PALU_TOT data from DB table
+        current_run.log_info(f"Loading DSE database data from table {table_name}")
         dse_database_data = load_db_table_data(table_name=table_name)
 
         # Add date columns and use combination of year+NUMSEM for period weeks
@@ -288,7 +307,7 @@ def pnlp_dse_database_push(pipeline_path: str, dhis2_client_target: DHIS2, confi
         current_run.log_info(
             f"Last DSE database pushed date {last_pushed_date} - DSE table data available until : {dse_date_max}"
         )
-        if dse_date_max <= last_pushed_date:
+        if dse_date_max <= last_pushed_date and not force_run:
             current_run.log_info("No new DSE data to push.")
             return True  # Exit!
 
@@ -382,7 +401,9 @@ def pnlp_dse_database_push(pipeline_path: str, dhis2_client_target: DHIS2, confi
 
 
 @dhis2_dse_push.task
-def pnlp_completude_push(pipeline_path: str, dhis2_client_target: DHIS2, config: dict, success: bool) -> bool:
+def pnlp_completude_push(
+    pipeline_path: str, dhis2_client_target: DHIS2, config: dict, success: bool, force_run: bool
+) -> bool:
     """Push DSE_completude table to NMDR DHIS2."""
 
     current_run.log_info("DSE completude data push started...")
@@ -418,6 +439,7 @@ def pnlp_completude_push(pipeline_path: str, dhis2_client_target: DHIS2, config:
             raise ValueError
 
         # Load DSE completude data from DB table
+        current_run.log_info(f"Loading DSE completude data from table {table_name}")
         dse_completude_data = load_db_table_data(table_name=table_name)
 
         # Add columns period and period_date
@@ -431,7 +453,7 @@ def pnlp_completude_push(pipeline_path: str, dhis2_client_target: DHIS2, config:
         current_run.log_info(
             f"Last DSE completude pushed date {last_date_pushed} - DSE completude data available until : {dse_date_max}"
         )
-        if dse_date_max <= last_date_pushed:
+        if dse_date_max <= last_date_pushed and not force_run:
             current_run.log_info("No new DSE completude data to push.")
             return True  # Exit!
 
@@ -1186,7 +1208,6 @@ def to_dhis2_format_dse_db(
 
 def load_db_table_data(table_name: str) -> pd.DataFrame:
     """Load db data from database table."""
-    current_run.log_info(f"Loading data from {table_name}")
     dbengine = create_engine(os.environ["WORKSPACE_DATABASE_URL"])
     data = pd.read_sql_table(table_name, con=dbengine)
     return data
