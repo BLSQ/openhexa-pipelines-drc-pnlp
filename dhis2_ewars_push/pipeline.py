@@ -9,12 +9,11 @@ import requests
 
 from openhexa.sdk import pipeline, workspace, current_run, parameter
 from openhexa.toolbox.dhis2 import DHIS2
-from openhexa.toolbox.dhis2.dataframe import get_organisation_units
 
 import config
 from ewars_client import EWARSClient
 
-from utils import split_list, get_response_value_errors
+from utils import split_list, get_response_value_errors, get_organisation_units
 
 
 @pipeline("dhis2-ewars-push")
