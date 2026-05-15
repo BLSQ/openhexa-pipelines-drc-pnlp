@@ -1,11 +1,17 @@
-from pathlib import Path
-import pandas as pd
-import polars as pl
-import papermill as pm
 from datetime import date, datetime
+from pathlib import Path
+
+import pandas as pd
+import papermill as pm
+import polars as pl
 from openhexa.sdk import current_run, parameter, pipeline, workspace
 from openhexa.toolbox.dhis2 import DHIS2
-from openhexa.toolbox.dhis2.dataframe import get_organisation_units
+from openhexa.toolbox.dhis2.dataframe import InvalidParameterError, get_organisation_unit_levels
+from utils import get_file_from_dataset, get_matching_filenames_from_dataset
+
+# NOTE: The idea of this pipeline is to run closely after the data has been extracted and shared via dataset from:
+# Workspace: DRC DSNIS
+# Pipeline: DHIS2 SNIS extract (dhis2-snis-extract)
 
 
 @pipeline("drc-pnlp-tdb")  # , timeout=28800 (8 * 60 * 60))
@@ -14,7 +20,7 @@ from openhexa.toolbox.dhis2.dataframe import get_organisation_units
     name="Year",
     help="Year for which to extract and process data",
     type=int,
-    default=2025,
+    default=2026,
     required=True,
 )
 @parameter(
@@ -26,14 +32,13 @@ from openhexa.toolbox.dhis2.dataframe import get_organisation_units
     required=True,
 )
 def pnlp_extract_process(get_year: int, get_run_notebooks: bool):
-    """ """
+    """Main pipeline code."""
     # setup variables
     pipeline_path = Path(workspace.files_path) / "pnlp-tdb-pipeline"
-    input_data_path = Path(workspace.files_path) / "pipelines" / "dhis2_snis_extract" / "data" / "raw" / "extracts"
     intput_nb = "LAUNCHER.ipynb"
 
     # extract data from DHIS
-    extract_dhis_data(pipeline_path=pipeline_path, input_data_path=input_data_path, year=get_year)
+    extract_dhis_data(pipeline_path=pipeline_path, input_data_path=pipeline_path / "data", year=get_year)
 
     # run processing code in notebook
     if get_run_notebooks:
@@ -49,14 +54,16 @@ def extract_dhis_data(pipeline_path: Path, input_data_path: Path, year: int) -> 
     current_run.log_info("Connecting to DHIS2 instance and extracting metadata")
     # Connect and get DHIS2 metadata
     dhis2_client = DHIS2(connection=workspace.dhis2_connection("drc-snis"), cache_dir=None)
-    org_units = get_organisation_units(dhis2_client)
-    org_units_lvl5 = org_units.filter(pl.col("level") == 5).to_pandas()  # fosa level
+    org_units = get_organisation_units(dhis2=dhis2_client, filters=["id", "name", "level"])
+    org_units_lvl5 = org_units.filter(pl.col("level") == 5).to_pandas()  # fosa levels
+
+    refresh_snis_extracts_from_dataset(pipeline_path=pipeline_path, dataset_id="snis-extracts")
 
     extract_periods_routine = get_quarters_until_now(year)
     for period in extract_periods_routine:
         retrieve_routine_data(
             pipeline_path=pipeline_path,
-            input_data_path=input_data_path,
+            input_data_path=input_data_path / "snis_extracts",
             period=period,
             dhis2_client=dhis2_client,
             org_units=org_units_lvl5,
@@ -65,20 +72,64 @@ def extract_dhis_data(pipeline_path: Path, input_data_path: Path, year: int) -> 
     extract_periods = get_dhis_month_period(year, routine=False)
     retrieve_acm_data(
         pipeline_path=pipeline_path,
-        input_data_path=input_data_path,
+        input_data_path=input_data_path / "snis_extracts",
         period=extract_periods[0],
         dhis2_client=dhis2_client,
         org_units=org_units_lvl5,
     )
+
     retrieve_reporting_data(
         pipeline_path=pipeline_path,
-        input_data_path=input_data_path,
+        input_data_path=input_data_path / "snis_extracts",
         period=extract_periods[0],
         org_units=org_units_lvl5,
     )
 
 
-def run_papermill_script(in_nb, out_nb_dir, parameters) -> None:
+def refresh_snis_extracts_from_dataset(pipeline_path: Path, dataset_id: str) -> None:
+    """Refreshes the SNIS extracts from the specified dataset."""
+    snis_extracts_path = pipeline_path / "data"
+
+    # Load pyramid
+    current_run.log_info(f"Downloading SNIS pyramid from dataset {dataset_id} file: snis_pyramid.parquet")
+    snis_pyramid = get_file_from_dataset(dataset_id, "snis_pyramid.parquet")
+    pyramid_path = pipeline_path / "data" / "snis_pyramid"
+    pyramid_path.mkdir(parents=True, exist_ok=True)
+    snis_pyramid.to_parquet(pyramid_path / "snis_pyramid.parquet")
+
+    # load population
+    try:
+        pop_filenames = get_matching_filenames_from_dataset(dataset_id=dataset_id, pattern="snis_population_*.parquet")
+    except Exception as e:
+        current_run.log_warning(f"Error while fetching SNIS population files from dataset {dataset_id}: {e}")
+        return
+
+    pop_path = pipeline_path / "data" / "snis_population"
+    pop_path.mkdir(parents=True, exist_ok=True)
+
+    for pop_filename in pop_filenames:
+        current_run.log_info(f"Downloading SNIS population data from dataset {dataset_id} file: {pop_filename}")
+        population = get_file_from_dataset(dataset_id, pop_filename)
+        population.to_parquet(pop_path / pop_filename)
+
+    # Load extracts
+    try:
+        analytics_filenames = get_matching_filenames_from_dataset(dataset_id=dataset_id, pattern="snis_data_*.parquet")
+    except Exception as e:
+        current_run.log_warning(f"Error while fetching SNIS extract files from dataset {dataset_id}: {e}")
+        return
+
+    extracts_path = snis_extracts_path / "snis_extracts"
+    extracts_path.mkdir(parents=True, exist_ok=True)
+
+    for filename in analytics_filenames:
+        current_run.log_info(f"Downloading SNIS extract from dataset {dataset_id} file: {filename}")
+        extract = get_file_from_dataset(dataset_id, filename)
+        extract.to_parquet(extracts_path / filename)
+
+
+def run_papermill_script(in_nb: Path, out_nb_dir: Path, parameters: dict) -> None:
+    """Runs the specified notebook with papermill, passing the given parameters."""
     current_run.log_info(f"Running code in {in_nb}")
     execution_timestamp = datetime.utcnow().strftime("%Y-%m-%d_%H%M%S")
     out_nb = out_nb_dir / f"{in_nb.stem}_OUTPUT_{execution_timestamp}.ipynb"
@@ -87,10 +138,9 @@ def run_papermill_script(in_nb, out_nb_dir, parameters) -> None:
 
 
 def retrieve_routine_data(
-    pipeline_path: Path, input_data_path: Path, period: list, dhis2_client=DHIS2, org_units=pd.DataFrame
+    pipeline_path: Path, input_data_path: Path, period: list, dhis2_client: DHIS2, org_units: pd.DataFrame
 ):
     """Retrieves routine data from the DHIS2 extracts."""
-
     metadata_file_path = pipeline_path / "data" / "metadata" / "data_elements_for_routine_extract.csv"
 
     # Get the list of monitored data elements (snis config file list?)
@@ -104,7 +154,7 @@ def retrieve_routine_data(
             current_run.log_info(f"Loading extract file: {extract_fname.name}")
             extract = pd.read_parquet(extract_fname)
             # check if all the data elements are present
-            not_found = set(monitored_des) - set(extract["dx_uid"].unique().tolist())
+            not_found = set(monitored_des) - set(extract["dx"].unique().tolist())
             if not_found:
                 current_run.log_warning(f"Data elements not found in period {p} : {not_found}.")
             loaded_extracts.append(extract)
@@ -114,7 +164,7 @@ def retrieve_routine_data(
     raw_routine_data = pd.concat(loaded_extracts, ignore_index=True)
 
     # filter data elements
-    raw_routine_data = raw_routine_data[raw_routine_data["dx_uid"].isin(monitored_des)]
+    raw_routine_data = raw_routine_data[raw_routine_data["dx"].isin(monitored_des)]
 
     # Theres an additional step here to handle the mappings for COC before and after Jan-2025
     if int(period[0]) >= 202501:
@@ -130,7 +180,7 @@ def retrieve_routine_data(
 
     # add metadata to the dataframe
     current_run.log_info("Adding metadata to the dataframe")
-    df = dhis2_client.meta.add_dx_name_column(dataframe=raw_routine_data, dx_id_column="dx_uid")
+    df = dhis2_client.meta.add_dx_name_column(dataframe=raw_routine_data, dx_id_column="dx")  # dx_uid
     df = dhis2_client.meta.add_coc_name_column(dataframe=df, coc_column="category_option_combo")
     df = df.merge(
         org_units,
@@ -142,7 +192,7 @@ def retrieve_routine_data(
 
     # Column renaming/selection and output directory
     column_names = {
-        "dx_uid": "dx",
+        "dx": "dx",
         "category_option_combo": "co",
         "org_unit": "ou",
         "period": "pe",
@@ -176,7 +226,7 @@ def retrieve_acm_data(
     dhis2_client: DHIS2,
     org_units: pd.DataFrame,
 ):
-    """"""
+    """Retrieves ACM data from the DHIS2 extracts. The ACM indicator is the one with dx 'fvlFcxuGRng'."""
     acm_indicator_id = ["fvlFcxuGRng"]
 
     current_run.log_info(f"Retrieving ACM data for : {period}")
@@ -187,7 +237,7 @@ def retrieve_acm_data(
             current_run.log_info(f"Loading extract file: {extract_fname.name}")
             extract = pd.read_parquet(extract_fname)
             # check if all the data elements are present
-            not_found = set(acm_indicator_id) - set(extract["dx_uid"].unique().tolist())
+            not_found = set(acm_indicator_id) - set(extract["dx"].unique().tolist())
             if not_found:
                 current_run.log_warning(f"ACM not found in period {p} : {acm_indicator_id}.")
             loaded_extracts.append(extract)
@@ -198,11 +248,11 @@ def retrieve_acm_data(
     raw_routine_data = pd.concat(loaded_extracts, ignore_index=True)
 
     # filter data elements
-    raw_routine_data = raw_routine_data[raw_routine_data["dx_uid"].isin(acm_indicator_id)]
+    raw_routine_data = raw_routine_data[raw_routine_data["dx"].isin(acm_indicator_id)]
 
     # add metadata to the dataframe
     current_run.log_info("Adding metadata to the dataframe")
-    df = dhis2_client.meta.add_dx_name_column(dataframe=raw_routine_data, dx_id_column="dx_uid")
+    df = dhis2_client.meta.add_dx_name_column(dataframe=raw_routine_data, dx_id_column="dx")
     df = df.merge(
         org_units,
         left_on="org_unit",
@@ -212,7 +262,7 @@ def retrieve_acm_data(
 
     # Column renaming/selection and output directory
     column_names = {
-        "dx_uid": "dx",
+        "dx": "dx",
         "org_unit": "ou",
         "period": "pe",
         "value": "value",
@@ -243,7 +293,7 @@ def retrieve_reporting_data(
     period: list,
     org_units: pd.DataFrame,
 ):
-    """"""
+    """Retrieves reporting rates data from the DHIS2 extracts."""
     current_run.log_info(f"Retrieving reporting data for : {period}")
 
     year = int(period[0]) // 100
@@ -264,7 +314,7 @@ def retrieve_reporting_data(
             current_run.log_info(f"Loading extract file: {extract_fname.name}")
             extract = pd.read_parquet(extract_fname)
             # check if all the data elements are present
-            not_found = set(reporting_datasets) - set(extract["dx_uid"].unique().tolist())
+            not_found = set(reporting_datasets) - set(extract["dx"].unique().tolist())
             if not_found:
                 current_run.log_warning(f"Reporting rates not found in period {p} : {not_found}.")
             loaded_extracts.append(extract)
@@ -275,8 +325,8 @@ def retrieve_reporting_data(
     raw_reporting_data = pd.concat(loaded_extracts, ignore_index=True)
 
     # filter data elements
-    raw_reporting_data = raw_reporting_data[raw_reporting_data["dx_uid"].isin(reporting_datasets)]
-    raw_reporting_data["dx_uid"] = raw_reporting_data["dx_uid"].replace(reporting_mappings)
+    raw_reporting_data = raw_reporting_data[raw_reporting_data["dx"].isin(reporting_datasets)]
+    raw_reporting_data["dx"] = raw_reporting_data["dx"].replace(reporting_mappings)
     if raw_reporting_data.shape[0] == 0:
         current_run.log_info(f"No reporting rates data found for the period: {period}.")
         return
@@ -291,11 +341,11 @@ def retrieve_reporting_data(
     )
     # Column renaming/selection and output directory
     column_names = {
-        "dx_uid": "ds",
+        "dx": "ds",  # dx_uid: ds (dataset)
         "org_unit": "ou",
         "period": "pe",
         "value": "value",
-        "rate_type": "metric",
+        "rate_metric": "metric",
         "level_1_id": "parent_level_1_id",
         "level_1_name": "parent_level_1_name",
         "level_2_id": "parent_level_2_id",
@@ -318,8 +368,11 @@ def retrieve_reporting_data(
 
 
 def map_rountine_coc_2025(df: pd.DataFrame) -> pd.DataFrame:
-    """Maps the old COC to the new COC for 2025 and onwards.
-    The mapping is done based on the dx_uid and the coc.
+    """Maps the COC for the routine data elements for 2025 onwards, where some of the data elements have changed COC.
+
+    Returns:
+    - df (pd.DataFrame) : the dataframe with the COC mapped for the relevant data elements,
+    and aggregated at dx_uid, period, org_unit, category_option_combo, attribute_option_combo level.
     """
     coc_mappings = {
         "xCV9NGB897u": "yI0WfOFcgSc",  # < 2 ans
@@ -340,17 +393,17 @@ def map_rountine_coc_2025(df: pd.DataFrame) -> pd.DataFrame:
         "sRbXNrdKvyl",
     ]
     # select only the IDS to map
-    df_des = df[df["dx_uid"].isin(changed_des)].copy()
-    df_rest = df[~(df["dx_uid"].isin(changed_des))].copy()
+    df_des = df[df["dx"].isin(changed_des)].copy()
+    df_rest = df[~(df["dx"].isin(changed_des))].copy()
 
     # Filter and map the COC for the changed data elements
     df_filtered = df_des[df_des["category_option_combo"].isin(list(coc_mappings.keys()))].copy()
     df_filtered["category_option_combo"] = df_filtered["category_option_combo"].replace(coc_mappings)
 
-    # group by dx_uid and category_option_combo, summing the values
+    # group by dx and category_option_combo, summing the values
     df_agg = (
         df_filtered.assign(value_numeric=lambda df: pd.to_numeric(df_filtered["value"], errors="coerce"))
-        .groupby(["dx_uid", "period", "org_unit", "category_option_combo", "attribute_option_combo"])
+        .groupby(["dx", "period", "org_unit", "category_option_combo", "attribute_option_combo"])
         .agg({"value_numeric": "sum"})
         .rename(columns={"value_numeric": "value"})
         .reset_index()
@@ -360,16 +413,15 @@ def map_rountine_coc_2025(df: pd.DataFrame) -> pd.DataFrame:
     return pd.concat([df_rest, df_agg], ignore_index=True).sort_values(by=["period"]).reset_index(drop=True)
 
 
-def get_dhis_month_period(year, routine=False):
-    """
-    Returns a list of lists of DHIS2 months (YYYYMM -- 202003) based on the year
-    specified to the function. For the current year, all months up to N-1 are
-    included in the list. For previous years, the list contains all months.
+def get_dhis_month_period(year: str, routine: bool = False) -> list[list[str]]:
+    """Returns a list of lists of month periods in DHIS2 format (e.g. 202401, 202402, etc.) for the given year.
 
-    Routine data is broken down by quarters to reduce the total size of the extract.
+    Returns:
+    - list of lists of month periods in DHIS2 format (e.g. 202401, 202402, etc.) for the given year.
+    If routine is True, it returns the periods grouped by quarter, otherwise it returns a single list with
+    all the months periods.
     """
     # LEGACY FUNCTION
-
     current_date = date.today()
     # "Hacky solution" to run the pipeline for a specific period
     # current_date = datetime.strptime('2024-04-01', '%Y-%m-%d').date() # Run for quarter Q1
@@ -402,6 +454,13 @@ def get_dhis_month_period(year, routine=False):
 
 
 def get_quarters_until_now(year: int) -> list[list[str]]:
+    """Returns a list of lists of month periods in DHIS2 format.
+
+    Example (e.g. 202401, 202402, etc.) for the given year, grouped by quarter, until the last complete month.
+
+    Returns:
+    - list of lists of month periods in DHIS2 format (e.g. 202401, 202402, etc.) for the given year, grouped by quarter.
+    """
     now = datetime.now()
     months = []
 
@@ -419,77 +478,118 @@ def get_quarters_until_now(year: int) -> list[list[str]]:
         return []
 
     # Group by quarters (chunks of 3 months)
-    quarters = [months[i : i + 3] for i in range(0, len(months), 3)]
-    return quarters
+    return [months[i : i + 3] for i in range(0, len(months), 3)]
 
 
-def dhis_period_range(year, start, end):
-    r = [f"{year}{str(x).zfill(2)}" for x in range(start, end + 1)]
+def dhis_period_range(year: int, start: int, end: int) -> list[str]:
+    """Returns a list of month periods in DHIS2 format (e.g. 202401, 202402, etc.) for the given year and month range.
 
-    return r
-
-
-def first_month_of_quarter(month):
+    Returns:
+    - list of month periods in DHIS2 format (e.g. 202401, 202402, etc.) for the given year and month range.
     """
-    Returns the number first month of the quarter
-    for the number month passed (1 - 12)
-    """
+    return [f"{year}{str(x).zfill(2)}" for x in range(start, end + 1)]
 
+
+def first_month_of_quarter(month: int) -> int:
+    """Returns the number first month of the quarter for the number month passed (1 - 12).
+
+    Returns:
+    - int : the number of the first month of the quarter (1, 4, 7, 10) corresponding to the given month.
+    """
     if month not in range(1, 13):
         raise ValueError("Not a valid month number (1-12)")
 
     return (month - 1) // 3 * 3 + 1
 
 
-def month_to_quarter(num):
-    """
-    Input:
-    - num (int) : a given month in DHIS format (e.g. 201808)
-    Returns: (str) the quarter corresponding to the given month (e.g. Q3)
+def month_to_quarter(num: int) -> str:
+    """Returns the quarter corresponding to the given month in DHIS format (e.g. 201808).
+
+    Returns:
+     -(str) the quarter corresponding to the given month (e.g. Q3)
     """
     # y = num // 100
     m = num % 100
     return "Q" + str((m - 1) // 3 + 1)
 
 
-## temporary method to add parent names of org units
-def add_org_unit_parent_columns_TEMP(df, org_units, dhis2):
-    levels = pl.DataFrame(dhis2.meta.organisation_unit_levels())
-    org_units_polar = pl.from_pandas(org_units.drop(columns=["geometry"]))
+def get_organisation_units(
+    dhis2: DHIS2, max_level: int | None = None, filters: list[str] | None = None
+) -> pl.DataFrame:
+    """Extract organisation units metadata.
 
-    # Create columns for parent levels
-    columns = []
-    for lvl in range(1, len(levels)):
-        columns.append(pl.col("path").str.split("/").list.get(lvl).alias(f"parent_level_{lvl}_id"))
+    Parameters
+    ----------
+    dhis2 : DHIS2
+        DHIS2 instance.
+    max_level : int, optional
+        Maximum level of organisation units to extract. If None, all levels are extracted.
+    filters : list[str], optional
+        DHIS2 query filter expressions.
 
-    org_units_parent = org_units_polar.with_columns(columns)
+    Returns
+    -------
+    pl.DataFrame
+        Dataframe containing organisation units metadata with the following columns: id, name,
+        level, level_{level}_id, level_{level}_name, geometry.
 
-    # Loop over the levels and perform the join for each
-    for lvl in range(1, len(levels)):
-        parent_level_df = org_units_polar.filter(pl.col("level") == lvl).select(
-            [pl.col("id"), pl.col("name").alias(f"parent_level_{lvl}_name")]
+    Raises
+    ------
+    InvalidParameter
+        If max_level is greater than the maximum level of the organisation units.
+    """
+    levels = get_organisation_unit_levels(dhis2)
+    if max_level:
+        if max_level > levels["level"].max():
+            msg = f"max_level cannot be greater than {levels['level'].max()}"
+            current_run.log_error(msg)
+            raise InvalidParameterError(msg)
+        level_filter = f"level:le:{max_level}"
+        if filters:
+            filters = [*filters, max_level]
+        else:
+            filters = [level_filter]
+
+    # meta = dhis2.meta.organisation_units(fields="id,name,level,path", filters=filters)
+    meta = dhis2.meta.organisation_units()
+
+    schema = {
+        "id": str,
+        "name": str,
+        "level": int,
+        "path": str,
+        "openingDate": str,
+        "geometry": str,
+    }
+    df = pl.DataFrame(data=meta, schema=schema)
+
+    for row in levels.iter_rows(named=True):
+        lvl = row["level"]
+        if max_level:
+            if lvl > max_level:
+                continue
+
+        df = df.with_columns(
+            pl.col("path").str.split("/").list.slice(1).list.get(lvl - 1, null_on_oob=True).alias(f"level_{lvl}_id")
         )
 
-        org_units_parent = org_units_parent.join(
-            other=parent_level_df,
-            left_on=f"parent_level_{lvl}_id",
+        df = df.join(
+            other=df.select("id", pl.col("name").alias(f"level_{lvl}_name")),
+            left_on=f"level_{lvl}_id",
             right_on="id",
             how="left",
-            coalesce=True,
         )
 
-    # Select only relevant columns from org_units_parent
-    selected_columns = ["id"] + [f"parent_level_{lvl}_{col}" for lvl in range(1, len(levels)) for col in ["id", "name"]]
-    selected_polars_df = org_units_parent.select(selected_columns)
+    df = df.select(
+        "id",
+        "name",
+        "level",
+        pl.col("openingDate").str.to_datetime("%Y-%m-%dT%H:%M:%S.%3f").alias("opening_date"),
+        *[col for col in df.columns if col.startswith("level_")],
+        "geometry",
+    )
 
-    # Convert to pandas DataFrame
-    selected_pandas_df = selected_polars_df.to_pandas()
-
-    # Merge with original dataframe
-    merged_df = df.merge(selected_pandas_df, left_on="ou", right_on="id", how="left")
-    merged_df.drop(columns=["id"], inplace=True)
-
-    return merged_df
+    return df.sort(by=["level", "name"], descending=False)
 
 
 if __name__ == "__main__":
