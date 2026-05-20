@@ -117,10 +117,6 @@ def push_organisation_units(pipeline_path: str, dhis2_client_target: DHIS2, conf
 
     # Load from dataset
     dhis2_pyramid_source = get_file_from_dataset(config["SETTINGS"].get("OPENHEXA_DATASET_ID"), "snis_pyramid.parquet")
-    dhis2_pyramid_target = retrieve_organisation_units(dhis2_client=dhis2_client_target, filter_level=5)
-    current_run.log_info(
-        f"Extracted {len(dhis2_pyramid_target[dhis2_pyramid_target.level == 5].id.unique())} units at level 5"
-    )
 
     try:
         DHIS2PyramidAligner(logger=logger, logging_interval=5000).align_to(
@@ -129,28 +125,6 @@ def push_organisation_units(pipeline_path: str, dhis2_client_target: DHIS2, conf
         )
     finally:
         save_logs(logs_file, output_dir=pipeline_path / "logs" / "push_orgunits")
-
-
-def retrieve_organisation_units(dhis2_client: DHIS2, filter_level: int | None = None) -> pd.DataFrame:
-    """Retrieves organisation units from the given DHIS2 client and returns them as a DataFrame.
-
-    Returns:
-        pd.DataFrame: A DataFrame containing the organisation units with their details.
-    """
-    current_run.log_info(f"Retrieving organisation units from target DHIS2 instance {dhis2_client.api.url}")
-
-    # retrieve full pyramid
-    try:
-        org_units = dhis2_client.meta.organisation_units(
-            fields="id,name,shortName,openingDate,closedDate,parent,level,path,geometry"
-        )
-        org_units = pd.DataFrame(org_units)
-        if filter_level:
-            org_units = org_units[org_units.level <= filter_level]  # Select level 5
-    except Exception as e:
-        raise Exception(f"An error occurred while retrieving organisation units: {e}") from e
-
-    return org_units
 
 
 def extract_timestamp_from_version_name(version_name: str) -> datetime:
