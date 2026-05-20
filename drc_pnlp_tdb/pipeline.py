@@ -13,8 +13,11 @@ from utils import get_file_from_dataset, get_matching_filenames_from_dataset
 # Workspace: DRC DSNIS
 # Pipeline: DHIS2 SNIS extract (dhis2-snis-extract)
 
+# ticket:
+# - https://bluesquare.atlassian.net/browse/PATHEOC-404
 
-@pipeline("drc-pnlp-tdb")  # , timeout=28800 (8 * 60 * 60))
+
+@pipeline("drc-pnlp-tdb", timeout=14400)  # (4 * 60 * 60))
 @parameter(
     "get_year",
     name="Year",
@@ -54,7 +57,7 @@ def extract_dhis_data(pipeline_path: Path, input_data_path: Path, year: int) -> 
     current_run.log_info("Connecting to DHIS2 instance and extracting metadata")
     # Connect and get DHIS2 metadata
     dhis2_client = DHIS2(connection=workspace.dhis2_connection("drc-snis"), cache_dir=None)
-    org_units = get_organisation_units(dhis2=dhis2_client, filters=["id", "name", "level"])
+    org_units = get_organisation_units(dhis2=dhis2_client)
     org_units_lvl5 = org_units.filter(pl.col("level") == 5).to_pandas()  # fosa levels
 
     refresh_snis_extracts_from_dataset(pipeline_path=pipeline_path, dataset_id="snis-extracts")
@@ -550,7 +553,7 @@ def get_organisation_units(
         else:
             filters = [level_filter]
 
-    # meta = dhis2.meta.organisation_units(fields="id,name,level,path", filters=filters)
+    # meta = dhis2.meta.organisation_units(fields="id,name,level,path,openingDate,closedDate,geometry", filters=filters)
     meta = dhis2.meta.organisation_units()
 
     schema = {
