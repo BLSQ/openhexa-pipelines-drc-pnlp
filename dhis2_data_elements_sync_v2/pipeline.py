@@ -106,7 +106,7 @@ def sync_organisation_units(pipeline_path: Path, dataset_id: str, run_task: bool
 
     current_run.log_info("Starting organisation units synchronization...")
     logger, logs_file = configure_logging(logs_path=Path("/home/jovyan/tmp/logs"), task_name="sync_orgunits")
-    # logger, logs_file = configure_logging(logs_path=pipeline_path / "logs", task_name="sync_orgunits")  # local
+    # logger, logs_file = configure_logging(logs_path=pipeline_path / "logs", task_name="sync_orgunits")
 
     # load configuration
     config_push = load_configuration(config_path=pipeline_path / "config" / "push_config.json")
