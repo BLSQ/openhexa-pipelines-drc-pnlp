@@ -178,7 +178,7 @@ def should_push_data(pipeline_path: Path, dataset_id: str) -> bool:
         last_update_str = last_update.get("LAST_UPDATE", "")
         last_update_dt = datetime.strptime(last_update_str, "%Y%m%d_%H%M") if last_update_str else None
     except Exception as e:
-        current_run.log_error(f"Error reading last update timestamp: Running update by default. Error: {e}")
+        current_run.log_warning(f"Error reading last update timestamp: Running update by default. Error: {e}")
         return True  # If we can't read the last update, assume we need to update
 
     if not last_update_dt or new_version_dt > last_update_dt:
@@ -360,7 +360,6 @@ def apply_dataelement_mappings(df: pd.DataFrame, mappings: dict) -> pd.DataFrame
     # map attribute option combo default
     aoc_default = mappings.get("ATTR_OPTION_COMBO", {}).get("DEFAULT")
     if aoc_default:
-        current_run.log_info(f"Applying default AOC {aoc_default} for AOC==None data elements.")
         df["attribute_option_combo"] = df["attribute_option_combo"].fillna(aoc_default)
 
     return df
@@ -386,7 +385,6 @@ def apply_dataelement_coc_mappings_2025(df: pd.DataFrame, mappings_coc_2025: dic
     # map category option combo default
     coc_default = mappings_coc_2025.get("DEFAULT")
     if coc_default:
-        current_run.log_info(f"Applying default COC {coc_default} for COC==None data elements.")
         df["attribute_option_combo"] = df["attribute_option_combo"].fillna(coc_default)
 
     # Loop over the DataElement COC mappings:
@@ -432,7 +430,7 @@ def apply_dataelement_coc_mappings_2024(df: pd.DataFrame, mappings_coc_2024: dic
     # map category option combo default
     coc_default = mappings_coc_2024.get("DEFAULT")
     if coc_default:
-        current_run.log_info(f"Using {coc_default} default COC id.")
+        # current_run.log_info(f"Using {coc_default} default COC id.")
         df["category_option_combo"] = df["category_option_combo"].fillna(coc_default)
 
     # Replace COC values using the provided mappings
@@ -496,7 +494,6 @@ def apply_acm_mappings(df: pd.DataFrame, mappings: dict) -> pd.DataFrame:
 
     uids_acm = mappings.get("UIDS")
     if uids_acm:
-        current_run.log_info(f"{len(uids_acm)} ACM indicator(s) uids to be mapped.")
         df.loc[:, "dx"] = df.loc[:, "dx"].replace(uids_acm)
 
     # map category option combo default

@@ -74,7 +74,7 @@ def should_push_data(pipeline_path: Path, dataset_id: str) -> bool:
         last_update_str = last_update.get("LAST_UPDATE", "")
         last_update_dt = datetime.strptime(last_update_str, "%Y%m%d_%H%M") if last_update_str else None
     except Exception as e:
-        current_run.log_error(f"Error reading last update timestamp: Running update by default. Error: {e}")
+        current_run.log_warning(f"Error reading last update timestamp: Running update by default. Error: {e}")
         return True  # If we can't read the last update, assume we need to update
 
     if not last_update_dt or new_version_dt > last_update_dt:
