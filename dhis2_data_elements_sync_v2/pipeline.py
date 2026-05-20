@@ -166,6 +166,7 @@ def push_extracts(pipeline_path: Path, dataset_id: str, run_task: bool) -> None:
 
     for filename in extract_filenames:
         current_run.log_info(f"Processing analytics file: {filename}")
+        logger.info(f"Processing analytics file: {filename}")  # should be included in the Push class
         try:
             df_data = get_file_from_dataset(dataset_id=dataset_id, filename=filename)
             df_mapped = apply_data_element_mappings(
@@ -177,6 +178,7 @@ def push_extracts(pipeline_path: Path, dataset_id: str, run_task: bool) -> None:
 
             # Sort the dataframe by org_unit to reduce import time (hopefully)
             df_mapped = df_mapped.sort_values(by=["org_unit"], ascending=True)
+            df_mapped["value"] = df_mapped["value"].replace("None", pd.NA)  # Ensure string "None" is treated as NA
             pusher.push_data(df_data=df_mapped)
             current_run.log_info(f"Data elements data push finished for extract: {filename}.")
         except Exception as e:
