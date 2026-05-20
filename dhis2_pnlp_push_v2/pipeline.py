@@ -348,6 +348,8 @@ def push_analytics(pipeline_path: str, dhis2_client_target: DHIS2, config: dict,
             )
 
             df_mapped = pd.concat([df_de_mapped, df_rr_mapped, df_ind_mapped], ignore_index=True)
+            df_mapped = df_mapped.sort_values(by=["org_unit"], ascending=True)
+            df_mapped["value"] = df_mapped["value"].replace("None", pd.NA)  # Ensure string "None" is treated as NA
 
             # push data
             pusher.push_data(df_data=df_mapped)

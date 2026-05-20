@@ -172,7 +172,7 @@ class DHIS2PyramidAligner:
                         org_unit=ou,
                         strategy="CREATE",
                     )
-                    self._handle_response(response=response, ou=ou, error_type="create")
+                    self._handle_response(response=response, ou=ou)
                 else:
                     self._log_and_append_error(
                         error_type="create",
@@ -194,7 +194,19 @@ class DHIS2PyramidAligner:
         if error_type not in ["create", "update"]:
             raise ValueError(f"Invalid error_type: {error_type}. Must be 'create' or 'update'.")
 
-        if not response.ok:
+        if response is None:
+            self._log_and_append_error(
+                error_type=error_type,
+                ou=ou,
+                error_msg=f"No response while trying to {error_type} organisation unit {ou.id}.",
+                level="error",
+                log_current_run=False,
+            )
+            return
+
+        try:
+            response.raise_for_status()
+        except requests.HTTPError:
             self._log_and_append_error(
                 error_type=error_type,
                 ou=ou,
@@ -208,7 +220,7 @@ class DHIS2PyramidAligner:
             return
 
         parsed_response = self._try_parse_json(response)
-        if parsed_response is None:
+        if not isinstance(parsed_response, dict):
             self._log_and_append_error(
                 error_type=error_type,
                 ou=ou,
@@ -230,9 +242,11 @@ class DHIS2PyramidAligner:
                 level="error",
                 log_current_run=False,
             )
-        else:
-            self.summary[error_type] += 1
-            self._log_message(f"Organisation unit {ou.name} ({ou.id}) {error_type}d successfully.")
+            return
+
+        summary_count = "created" if error_type == "create" else "updated"
+        self.summary[summary_count] += 1
+        self._log_message(f"Organisation unit {ou.name} ({ou.id}) {summary_count} successfully.")
 
     def _push_org_units_update(
         self,
