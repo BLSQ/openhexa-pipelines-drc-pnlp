@@ -63,10 +63,12 @@ def dhis2_pnlp_push_v2(push_orgunits: bool, push_pop: bool, push_analytics_task:
 
         # check updated data in dataset
         to_update = should_push_data(
-            pipeline_path=pipeline_path, dataset_id=config["SETTINGS"].get("OPENHEXA_DATASET_ID")
+            dataset_id=config["SETTINGS"].get("OPENHEXA_DATASET_ID"),
+            timestamp_path=pipeline_path / "config" / "last_update.json",
         )
 
         if to_update or force_run:
+            current_run.log_info("New data version detected. Starting pipeline execution...")
             push_organisation_units(
                 pipeline_path=pipeline_path,
                 dhis2_client_target=dhis2_client,
@@ -89,10 +91,11 @@ def dhis2_pnlp_push_v2(push_orgunits: bool, push_pop: bool, push_analytics_task:
             )
 
             update_last_run_timestamp(
-                pipeline_path=pipeline_path, dataset_id=config["SETTINGS"].get("OPENHEXA_DATASET_ID")
+                timestamp_filename=pipeline_path / "config" / "last_update.json",
+                dataset_id=config["SETTINGS"].get("OPENHEXA_DATASET_ID"),
             )
         else:
-            current_run.log_info("No update needed. Skipping push tasks.")
+            current_run.log_info("No updates found. Pipeline execution skipped.")
 
     except Exception as e:
         current_run.log_error(f"An error occurred: {e}")
@@ -160,7 +163,7 @@ def get_dataset_version_timestamp(dataset_id: str) -> datetime:
         raise Exception(f"An error occurred while fetching the dataset or extracting the timestamp: {e}") from e
 
 
-def should_push_data(pipeline_path: Path, dataset_id: str) -> bool:
+def should_push_data(dataset_id: str, timestamp_path: Path) -> bool:
     """Check if new data is available by comparing the latest dataset version timestamp.
 
     Returns:
@@ -174,19 +177,14 @@ def should_push_data(pipeline_path: Path, dataset_id: str) -> bool:
 
     # read last run timestamp from file
     try:
-        last_update = read_json_file(pipeline_path / "config" / "last_update.json")
+        last_update = read_json_file(timestamp_path)
         last_update_str = last_update.get("LAST_UPDATE", "")
         last_update_dt = datetime.strptime(last_update_str, "%Y%m%d_%H%M") if last_update_str else None
     except Exception as e:
         current_run.log_warning(f"Error reading last update timestamp: Running update by default. Error: {e}")
         return True  # If we can't read the last update, assume we need to update
 
-    if not last_update_dt or new_version_dt > last_update_dt:
-        current_run.log_info("New data version detected. Update needed.")
-        return True
-
-    current_run.log_info("Data is up to date. No update needed.")
-    return False
+    return not last_update_dt or new_version_dt > last_update_dt
 
 
 def push_population(pipeline_path: str, dhis2_client_target: DHIS2, config: dict, run_task: bool) -> None:
@@ -514,16 +512,17 @@ def apply_acm_mappings(df: pd.DataFrame, mappings: dict) -> pd.DataFrame:
     return df
 
 
-def update_last_run_timestamp(pipeline_path: Path, dataset_id: str) -> None:
+def update_last_run_timestamp(timestamp_filename: Path, dataset_id: str) -> None:
     """Updates the last run timestamp in the JSON file."""
     timestamp = get_dataset_version_timestamp(dataset_id=dataset_id)
     try:
         save_json_file(
-            file_path=pipeline_path / "config" / "last_update.json",
+            file_path=timestamp_filename,
             contents={"LAST_UPDATE": timestamp.strftime("%Y%m%d_%H%M")},
         )
     except Exception as e:
         current_run.log_error(f"Error updating last run timestamp: {e}")
+    current_run.log_info(f"Last run timestamp updated to: {timestamp.strftime('%Y%m%d_%H%M')}")
 
 
 if __name__ == "__main__":

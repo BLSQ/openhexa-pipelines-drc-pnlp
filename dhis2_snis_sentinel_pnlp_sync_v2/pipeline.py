@@ -11,6 +11,7 @@ from utils import (
     get_file_from_dataset,
     load_configuration,
     read_json_file,
+    save_json_file,
     save_logs,
 )
 
@@ -37,9 +38,12 @@ def dhis2_snis_sentinel_pnlp_sync_v2(push_analytics: bool, force_run: bool) -> N
 
     # check updated data in dataset
     sentinel_dataset_id = "snis-sentinel-dataset"
-    to_update = should_push_data(pipeline_path=pipeline_path, dataset_id=sentinel_dataset_id)
+    to_update = should_push_data(
+        dataset_id=sentinel_dataset_id, timestamp_path=pipeline_path / "config" / "last_update.json"
+    )
 
     if to_update or force_run:
+        current_run.log_info("New data version detected. Starting pipeline execution...")
         try:
             push_extracts(
                 pipeline_path=pipeline_path,
@@ -47,6 +51,10 @@ def dhis2_snis_sentinel_pnlp_sync_v2(push_analytics: bool, force_run: bool) -> N
                 run_task=push_analytics,
             )
 
+            update_last_run_timestamp(
+                timestamp_filename=pipeline_path / "config" / "last_update.json",
+                dataset_id=sentinel_dataset_id,
+            )
         except Exception as e:
             current_run.log_error(f"An error occurred: {e}")
             raise
@@ -56,7 +64,7 @@ def dhis2_snis_sentinel_pnlp_sync_v2(push_analytics: bool, force_run: bool) -> N
     current_run.log_info("Pipeline execution completed.")
 
 
-def should_push_data(pipeline_path: Path, dataset_id: str) -> bool:
+def should_push_data(dataset_id: str, timestamp_path: Path) -> bool:
     """Check if new data is available by comparing the latest dataset version timestamp.
 
     Returns:
@@ -70,19 +78,14 @@ def should_push_data(pipeline_path: Path, dataset_id: str) -> bool:
 
     # read last run timestamp from file
     try:
-        last_update = read_json_file(pipeline_path / "config" / "last_update.json")
+        last_update = read_json_file(timestamp_path)
         last_update_str = last_update.get("LAST_UPDATE", "")
         last_update_dt = datetime.strptime(last_update_str, "%Y%m%d_%H%M") if last_update_str else None
     except Exception as e:
         current_run.log_warning(f"Error reading last update timestamp: Running update by default. Error: {e}")
         return True  # If we can't read the last update, assume we need to update
 
-    if not last_update_dt or new_version_dt > last_update_dt:
-        current_run.log_info("New data version detected. Update needed.")
-        return True
-
-    current_run.log_info("Data is up to date. No update needed.")
-    return False
+    return not last_update_dt or new_version_dt > last_update_dt
 
 
 def push_extracts(pipeline_path: Path, dataset_id: str, run_task: bool = True) -> None:
@@ -245,6 +248,20 @@ def clean_mapping(mapping: dict) -> dict:
         dict: Cleaned mapping dictionary.
     """
     return {str(k).strip(): str(v).strip() for k, v in mapping.items() if v is not None}
+
+
+def update_last_run_timestamp(timestamp_filename: Path, dataset_id: str) -> None:
+    """Updates the last run timestamp in the JSON file."""
+    timestamp = get_dataset_version_timestamp(dataset_id=dataset_id)
+    try:
+        save_json_file(
+            file_path=timestamp_filename,
+            contents={"LAST_UPDATE": timestamp.strftime("%Y%m%d_%H%M")},
+        )
+    except Exception as e:
+        current_run.log_error(f"Error updating last run timestamp: {e}")
+
+    current_run.log_info(f"Last run timestamp updated to: {timestamp.strftime('%Y%m%d_%H%M')}")
 
 
 if __name__ == "__main__":
