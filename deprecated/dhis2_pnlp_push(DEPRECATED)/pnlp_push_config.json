@@ -1,0 +1,218 @@
+{
+	"PUSH_SETTINGS": {
+		"DHIS2_CONNECTION": "dhis2-nmdr-drc",
+		"IMPORT_STRATEGY": "CREATE_AND_UPDATE",
+		"DRY_RUN": false,
+		"MAX_POST": 20000
+	},
+	"POPULATION_MAPPING": {
+		"UIDS": {},
+		"ORG_UNITS": {},
+		"CAT_OPTION_COMBO": {
+			"DEFAULT": "HllvX50cXC0"
+		},
+		"ATTR_OPTION_COMBO": {
+			"DEFAULT": "HllvX50cXC0"
+		}
+	},
+	"DATAELEMENT_MAPPING": {
+		"UIDS": {
+		},
+		"ORG_UNITS": {},
+		"CAT_OPTION_COMBO": { 			
+			"MAPPINGS_2025": {
+				"DEFAULT": "HllvX50cXC0",
+				"UIDS" :{
+					"aZwnLALknnj" : {
+						"xxMINnPGqUg" : "V7pUmNFU588",
+						"xCV9NGB897u" : "Kdl7hgi5hkc ",
+						"r5lWfJh2t2l" : "QqXK1ZfKXWz "
+					},
+					"AxJhIi7tUam" : {
+						"xxMINnPGqUg" : "V7pUmNFU588",
+						"xCV9NGB897u" : "Kdl7hgi5hkc ",
+						"r5lWfJh2t2l" : "QqXK1ZfKXWz "
+					},
+					"CGZbvJchfjk" : {
+						"xxMINnPGqUg" : "V7pUmNFU588",
+						"xCV9NGB897u" : "Kdl7hgi5hkc ",
+						"r5lWfJh2t2l" : "QqXK1ZfKXWz "
+					}, 
+					"aK0QXqm8Zxn" : {
+						"xxMINnPGqUg" : "V7pUmNFU588",
+						"xCV9NGB897u" : "Kdl7hgi5hkc ",
+						"r5lWfJh2t2l" : "QqXK1ZfKXWz "
+					},
+					"rfeqp2kdOGi" : {
+						"xxMINnPGqUg" : "V7pUmNFU588",
+						"xCV9NGB897u" : "Kdl7hgi5hkc ",
+						"r5lWfJh2t2l" : "QqXK1ZfKXWz "
+					},
+					"nRm30I4w9En" : {
+						"xxMINnPGqUg" : "V7pUmNFU588",
+						"xCV9NGB897u" : "Kdl7hgi5hkc ",
+						"r5lWfJh2t2l" : "QqXK1ZfKXWz "
+					},
+					"SpmQSLRPMl4" : {
+						"xxMINnPGqUg" : "V7pUmNFU588",
+						"xCV9NGB897u" : "Kdl7hgi5hkc ",
+						"r5lWfJh2t2l" : "QqXK1ZfKXWz "
+					},
+					"CIzQAR8IWH1" : {
+						"xxMINnPGqUg" : "V7pUmNFU588",
+						"xCV9NGB897u" : "Kdl7hgi5hkc ",
+						"r5lWfJh2t2l" : "QqXK1ZfKXWz "
+					},
+					"wfmDVt6RVm2" : {
+						"xxMINnPGqUg" : "V7pUmNFU588",
+						"xCV9NGB897u" : "Kdl7hgi5hkc ",
+						"r5lWfJh2t2l" : "QqXK1ZfKXWz "
+					},
+					"e6qMP9fVtG9" : {
+						"xxMINnPGqUg" : "V7pUmNFU588",
+						"xCV9NGB897u" : "Kdl7hgi5hkc ",
+						"r5lWfJh2t2l" : "QqXK1ZfKXWz "
+					},
+					"sRbXNrdKvyl" : {
+						"xxMINnPGqUg" : "V7pUmNFU588",
+						"xCV9NGB897u" : "Kdl7hgi5hkc ",
+						"r5lWfJh2t2l" : "QqXK1ZfKXWz "
+					}
+				},
+				"GENERAL_MAPPINGS": {
+					"NOHlOxLczjc": "LDiWCacuUIP",
+					"t5L9ODSuYOG": "esc8zGx9ZPn",
+					"yI0WfOFcgSc": "yw4D8ERhjQt",
+					"dMKXC5AcNoa": "tZzksk9mdtm",
+					"o6NIEn9kH0G": "iZYKXIHMzqW",
+					"VrEj0UVVGr4": "ev3fVb2b1jC",
+					"KPDzIsWq7JK": "iuWQ2G6wr75",
+					"Lpu56KTyGvy": "zOJKBBaf2Yp",
+					"WZwmzIuRvwV": "Ss692Pp33B2",
+					"jpmZl19SSta": "ZQrNRZpRvmm",
+					"mZLRF4eSPIk": "DusYxv3ERvq",
+					"brxxCYkQqcd": "QqXK1ZfKXWz",
+					"GSCwhT2SCCr": "N4MWmTdErg1",
+					"ddJmZUacsvQ": "PE81R685t6t",
+					"XEN3ucCGa07": "p4z5oyK5iKn",
+					"sv1SxqCgbv1": "N1WrLEz6xtJ",
+					"pdKyvaYRqCj": "ca5676WxlQm",
+					"kOWsLrtvrhn": "blIYGj2CESx",
+					"QCLtpvGarcp": "CvkwGQ4MIQH",
+					"J8mw9rFkY4v": "qyRYaxJpyJD",
+					"Dl5DTT7zYLV": "Gfcn0DnzLPa",
+					"QRyK6yxKBU3": "IrYHLjGaZJs",
+					"Dr4rWTqepnP": "LOM3eh5MFJf",
+					"OqhRjjcSBCP": "yw4D8ERhjQt",
+					"EKhD0OhADLs": "QqXK1ZfKXWz"
+				}
+			},
+			"MAPPINGS_2024": {
+				"DEFAULT": "HllvX50cXC0",
+				"MAPPINGS" : {
+					"NOHlOxLczjc": "LDiWCacuUIP",
+					"t5L9ODSuYOG": "esc8zGx9ZPn",
+					"yI0WfOFcgSc": "yw4D8ERhjQt",
+					"dMKXC5AcNoa": "tZzksk9mdtm",
+					"o6NIEn9kH0G": "iZYKXIHMzqW",
+					"VrEj0UVVGr4": "ev3fVb2b1jC",
+					"KPDzIsWq7JK": "iuWQ2G6wr75",
+					"Lpu56KTyGvy": "zOJKBBaf2Yp",
+					"WZwmzIuRvwV": "Ss692Pp33B2",
+					"jpmZl19SSta": "ZQrNRZpRvmm",
+					"mZLRF4eSPIk": "DusYxv3ERvq",
+					"brxxCYkQqcd": "QqXK1ZfKXWz",
+					"GSCwhT2SCCr": "N4MWmTdErg1",
+					"ddJmZUacsvQ": "PE81R685t6t",
+					"XEN3ucCGa07": "p4z5oyK5iKn",
+					"sv1SxqCgbv1": "N1WrLEz6xtJ",
+					"pdKyvaYRqCj": "ca5676WxlQm",
+					"kOWsLrtvrhn": "blIYGj2CESx",
+					"QCLtpvGarcp": "CvkwGQ4MIQH",
+					"J8mw9rFkY4v": "qyRYaxJpyJD",
+					"Dl5DTT7zYLV": "Gfcn0DnzLPa",
+					"QRyK6yxKBU3": "IrYHLjGaZJs",
+					"Dr4rWTqepnP": "LOM3eh5MFJf",
+					"OqhRjjcSBCP": "yw4D8ERhjQt",
+					"EKhD0OhADLs": "QqXK1ZfKXWz"
+				},
+				"IGNORE_MAPPINGS" : ["xxMINnPGqUg", "xCV9NGB897u", "r5lWfJh2t2l"]				
+			}	
+		},
+		"ATTR_OPTION_COMBO": {
+			"DEFAULT": "HllvX50cXC0"
+		}
+	},
+	"RATE_MAPPING":{
+		"2024" : {
+			"pMbC0FJPkcm": {				
+				"REPORTING_RATE": "exAVbQjIquh",
+				"EXPECTED_REPORTS" : "NXE3Et24MJB",
+				"ACTUAL_REPORTS" : "t0iGpWMH21V",
+				"ACTUAL_REPORTS_ON_TIME" : "W7S8NrCAft6",
+				"REPORTING_RATE_ON_TIME": "JYZDcaokEvd"
+			},
+			"maDtHIFrSHx": {			
+				"REPORTING_RATE": "mTIRduQxRBj",
+				"EXPECTED_REPORTS" : "TtIcJWgINdv",
+				"ACTUAL_REPORTS" : "H60HLZLKCO7",
+				"ACTUAL_REPORTS_ON_TIME" : "MHRSb463cKk",
+				"REPORTING_RATE_ON_TIME": "FBy4t3dpNwe"
+			},
+			"OeWrFwkFMvf": {		
+				"REPORTING_RATE": "yMmhVzk1G5v",
+				"EXPECTED_REPORTS" : "ZffOapXsRmC",
+				"ACTUAL_REPORTS" : "yPPetvaBHpR",
+				"ACTUAL_REPORTS_ON_TIME" : "NdbMsPnV27p",
+				"REPORTING_RATE_ON_TIME": "APK7KU1rax0"
+			}		
+		},
+		"2025" : {
+			"ahT7ysZZ913": {			
+				"REPORTING_RATE": "exAVbQjIquh",
+				"EXPECTED_REPORTS" : "NXE3Et24MJB",
+				"ACTUAL_REPORTS" : "t0iGpWMH21V",
+				"ACTUAL_REPORTS_ON_TIME" : "W7S8NrCAft6",
+				"REPORTING_RATE_ON_TIME": "JYZDcaokEvd"
+			},
+			"E4BX1ea2iDJ" : {
+				"REPORTING_RATE": "mTIRduQxRBj",
+				"EXPECTED_REPORTS" : "TtIcJWgINdv",
+				"ACTUAL_REPORTS" : "H60HLZLKCO7",
+				"ACTUAL_REPORTS_ON_TIME" : "MHRSb463cKk",
+				"REPORTING_RATE_ON_TIME": "FBy4t3dpNwe"
+			},
+			"DxDuYrrZSa7" : {
+				"REPORTING_RATE": "oyksGqmDi2L",
+				"EXPECTED_REPORTS" : "fYidR4Ky1CH",
+				"ACTUAL_REPORTS" : "EfrotWLevNZ",
+				"ACTUAL_REPORTS_ON_TIME" : "VHPA7pUmwTe",
+				"REPORTING_RATE_ON_TIME": "dHVyg2zJunx"
+			},
+			"CfCNNEwbTSH" : {
+				"REPORTING_RATE": "yMmhVzk1G5v",
+				"EXPECTED_REPORTS" : "ZffOapXsRmC",
+				"ACTUAL_REPORTS" : "yPPetvaBHpR",
+				"ACTUAL_REPORTS_ON_TIME" : "NdbMsPnV27p",
+				"REPORTING_RATE_ON_TIME": "APK7KU1rax0"
+			}
+		},
+		"CAT_OPTION_COMBO": {
+			"DEFAULT" : "HllvX50cXC0"
+		},
+		"ATTR_OPTION_COMBO": {
+			"DEFAULT": "HllvX50cXC0"
+		}	
+	},
+	"ACM_INDICATOR_MAPPING": {
+		"UIDS": {
+			"fvlFcxuGRng": "h3obeU9g6Ul"
+		},			
+		"CAT_OPTION_COMBO": {
+			"DEFAULT" : "HllvX50cXC0"
+		},
+		"ATTR_OPTION_COMBO": {
+			"DEFAULT": "HllvX50cXC0"
+		}	
+	}
+}
