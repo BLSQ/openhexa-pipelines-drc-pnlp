@@ -19,7 +19,7 @@ from utils import (
 )
 
 
-@pipeline("dhis2_pnlp_push_v2")
+@pipeline("dhis2_pnlp_push_v2", timeout=36000)
 @parameter(
     "push_orgunits",
     name="Push Organisation Units",

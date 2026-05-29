@@ -18,7 +18,7 @@ from utils import (
 )
 
 
-@pipeline("dhis2_data_elements_sync_v2")
+@pipeline("dhis2_data_elements_sync_v2", timeout=28800)
 @parameter(
     "ou_sync",
     name="Run org units sync",
