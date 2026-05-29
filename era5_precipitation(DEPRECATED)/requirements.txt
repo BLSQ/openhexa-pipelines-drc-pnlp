@@ -1,2 +1,0 @@
-cdsapi==0.7.5
-openhexa.toolbox==1.6.1
