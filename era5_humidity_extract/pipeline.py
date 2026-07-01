@@ -1,3 +1,11 @@
+from datetime import datetime, timezone
+from io import BytesIO
+from math import ceil
+from pathlib import Path
+
+import geopandas as gpd
+from datapi import ApiClient
+from dateutil.relativedelta import relativedelta
 from openhexa.sdk import (
     CustomConnection,
     Dataset,
@@ -6,15 +14,8 @@ from openhexa.sdk import (
     pipeline,
     workspace,
 )
-from io import BytesIO
-from math import ceil
-import geopandas as gpd
-from datetime import datetime, timezone
-from openhexa.toolbox.dhis2.periods import period_from_string
-from datapi import ApiClient
-from dateutil.relativedelta import relativedelta
-from pathlib import Path
 from openhexa.sdk.datasets import DatasetFile
+from openhexa.toolbox.dhis2.periods import period_from_string
 
 
 @pipeline("era5_humidity_extract")
@@ -24,6 +25,7 @@ from openhexa.sdk.datasets import DatasetFile
     name="Start date",
     help="Start date of extraction period.",
     default="2018-01-01",
+    required=False,
 )
 @parameter(
     "end_date",
@@ -81,6 +83,11 @@ def era5_extract(
     bounds = get_bounds(boundaries)
     current_run.log_info(f"Using area of interest: {bounds}")
 
+    if not start_date:
+        # Let's set the start date to 2 months ago from today
+        start_date = (datetime.now().astimezone(timezone.utc) - relativedelta(months=2)).strftime("%Y-%m-%d")
+        current_run.log_info(f"Start date set to {start_date}")
+
     if not end_date:
         # Let's set the end date to the last day of the previous month
         end_date = (datetime.now().astimezone(timezone.utc).replace(day=1) - relativedelta(days=1)).strftime("%Y-%m-%d")
@@ -100,7 +107,7 @@ def era5_extract(
 
     except Exception as e:
         current_run.log_error(f"Error downloading humidity data: {e}")
-        raise ValueError(f"Invalid date format: {e}")
+        raise
 
 
 def download_data(
@@ -148,8 +155,8 @@ def read_boundaries(boundaries_dataset: Dataset, filename: str | None = None) ->
         Filename of the boundaries file to read if there are several.
         If set to None, the 1st parquet file found will be loaded.
 
-    Return
-    ------
+    Returns
+    -------
     gpd.GeoDataFrame
         Geopandas GeoDataFrame containing boundaries geometries
 
@@ -187,8 +194,8 @@ def get_bounds(boundaries: gpd.GeoDataFrame) -> tuple[int]:
     boundaries : gpd.GeoDataFrame
         Geopandas GeoDataFrame containing boundaries geometries
 
-    Return
-    ------
+    Returns
+    -------
     tuple[int]
         Bounding box coordinates in the order (ymax, xmin, ymin, xmax)
     """
