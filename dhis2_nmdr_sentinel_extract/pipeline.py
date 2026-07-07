@@ -4,7 +4,7 @@ import polars as pl
 from d2d_development.extract import DHIS2Extractor
 from openhexa.sdk import current_run, parameter, pipeline, workspace
 from openhexa.toolbox.dhis2 import DHIS2
-from openhexa.toolbox.dhis2.dataframe import get_organisation_units
+from openhexa.toolbox.dhis2.dataframe import get_organisation_unit_groups, get_organisation_units
 from utils import (
     add_files_to_dataset,
     connect_to_dhis2,
@@ -13,6 +13,12 @@ from utils import (
     resolve_dates_and_validate,
     save_to_parquet,
 )
+
+# Sentinelle org unit groups: maps group ID -> display name
+SENTINELLE_OU_GROUPS = {
+    "qTZ3L6pLMTi": "CS Site Sentinelle",
+    "wldxDI2Ey5c": "HGR Site Sentinelle",
+}
 
 
 @pipeline("dhis2_nmdr_sentinel_extract", timeout=21600)  # 6 hours
@@ -69,14 +75,24 @@ def dhis2_nmdr_sentinel_extract(start_date: str, end_date: str, run_extract_data
     start, end = resolve_dates_and_validate(start_date, end_date, config)
     extract_periods = get_extract_periods(start, end)
 
-    try:
-        extract_pyramid_metadata(pipeline_path=pipeline_path, dhis2_nmdr_client=dhis2_client, run_task=run_extract_data)
+    # Retrieve org units belonging to the two sentinelle groups
+    ## need to add something to tell ti to only extract data for the org units in my sentinelles groups -> check df = dataframe.get_organisation_unit_levels(dhis2)
+    sentinelle_ou_list, sentinelle_ou_groups = get_sentinelle_org_units(dhis2_client)
+    current_run.log_info(f"Found {len(sentinelle_ou_list)} sentinelle facilities across {len(SENTINELLE_OU_GROUPS)} groups.")
 
+    try:
+        extract_pyramid_metadata(
+            pipeline_path=pipeline_path,
+            dhis2_nmdr_client=dhis2_client,
+            run_task=run_extract_data,
+        )
         extract_data(
             pipeline_path=pipeline_path,
             extract_periods=extract_periods,
             config=config,
             dhis2_nmdr_client=dhis2_client,
+            sentinelle_ou_list=sentinelle_ou_list,
+            sentinelle_ou_groups=sentinelle_ou_groups,
             run_task=run_extract_data,
         )
 
@@ -86,6 +102,7 @@ def dhis2_nmdr_sentinel_extract(start_date: str, end_date: str, run_extract_data
         current_run.log_error(f"An error occurred: {e}")
         raise
 
+    ## to delete because I don't need to copy the data to nmdr_extract - update transform pipelie to task to read from there
     try:
         nmdr_sentinel_extract_paths = compile_nmdr_extracts(
             extract_periods=extract_periods,
@@ -98,6 +115,7 @@ def dhis2_nmdr_sentinel_extract(start_date: str, end_date: str, run_extract_data
         current_run.log_error(f"An error while compiling data: {e}")
         raise
 
+    ## to delete because I will not share this data with another workspace
     try:
         update_nmdr_dataset(
             new_extracts = nmdr_sentinel_extract_paths,
@@ -108,6 +126,40 @@ def dhis2_nmdr_sentinel_extract(start_date: str, end_date: str, run_extract_data
     except Exception as e:
         current_run.log_error(f"An error occurred while updating the dataset: {e}")
         raise
+
+    ## add a new task to transform the data try function -> except rise error and log to say data has been transformed/extracted,
+    # add parameter to sometimes only run extract  or only run transform, or both
+
+
+def get_sentinelle_org_units(dhis2_client: DHIS2) -> tuple[list[str], dict[str, str]]:
+    """Retrieves org unit IDs and group name mapping for all sentinelle facilities.
+
+    Queries the two sentinelle org unit groups (CS and HGR) and builds:
+    - a flat list of all org unit IDs belonging to either group
+    - a dict mapping each org unit ID to its group display name
+
+    Args:
+        dhis2_client (DHIS2): Connected DHIS2 client.
+
+    Returns:
+        tuple[list[str], dict[str, str]]:
+            - List of sentinelle org unit IDs.
+            - Dict mapping org unit ID -> group display name.
+    """
+    try:
+        ou_groups_df = get_organisation_unit_groups(dhis2_client)
+    except Exception as e:
+        raise Exception(f"Error retrieving organisation unit groups: {e}") from e
+
+    sentinelle_groups = ou_groups_df.filter(pl.col("id").is_in(list(SENTINELLE_OU_GROUPS.keys())))
+
+    ou_to_group: dict[str, str] = {}
+    for row in sentinelle_groups.iter_rows(named=True):
+        group_name = SENTINELLE_OU_GROUPS[row["id"]]
+        for ou_id in row["organisation_units"]:
+            ou_to_group[ou_id] = group_name
+
+    return list(ou_to_group.keys()), ou_to_group
 
 
 def extract_pyramid_metadata(pipeline_path: str, dhis2_nmdr_client: DHIS2, run_task: bool) -> None:
@@ -143,6 +195,8 @@ def extract_data(
     extract_periods: list[str],
     config: dict,
     dhis2_nmdr_client: DHIS2,
+    sentinelle_ou_list: list[str],
+    sentinelle_ou_groups: dict[str, str],
     run_task: bool,
 ) -> None:
     """Retrieves DHIS2 analytics data elements and reporting rates for the given periods.
@@ -152,6 +206,10 @@ def extract_data(
         extract_periods (list[str]): Periods to extract, in YYYYMM format.
         config (dict): Extraction configuration loaded from extract_config.json.
         dhis2_nmdr_client (DHIS2): Connected DHIS2 client used to retrieve the data.
+        sentinelle_ou_list (list[str]): Sentinelle org unit IDs to extract data for.
+            # => if possible move it outside this function, to be passed as a parameter to the main extract function extract_data
+        sentinelle_ou_groups (dict[str, str]): Mapping of org unit ID -> group display name,
+            used to add the organisationUnitGroup column to extracted data.
         run_task (bool): Whether to run this extraction step.
     """
     if not run_task:
@@ -160,10 +218,9 @@ def extract_data(
 
     current_run.log_info("Retrieving DHIS2 analytics data")
 
-    # retrieve FOSA ids from NMDR
-    fosa_list = _get_ou_list(
-        pyramid_fname=pipeline_path / "data" / "pyramid_metadata" / "nmdr_pyramid_metadata.parquet", ou_level=5
-    )
+    # retrieve FOSA ids from NMDR => to modify to take only df = dataframe.get_organisation_unit_levels(dhis2)
+    # => if possible move it outside this function, to be passed as a parameter to the main extract function extract_data
+    fosa_list = sentinelle_ou_list
     current_run.log_info(f"Download MODE: {config['SETTINGS']['MODE']} for periods: {extract_periods}")
 
     # limits
@@ -177,6 +234,7 @@ def extract_data(
         dhis2_client=dhis2_nmdr_client,
         periods=extract_periods,
         org_unit_list=fosa_list,
+        sentinelle_ou_groups=sentinelle_ou_groups,
         config=config,
     )
     current_run.log_info("Data elements extract finished.")
@@ -208,6 +266,7 @@ def _extract_data_elements_for_periods(
     dhis2_client: DHIS2,
     periods: list[str],
     org_unit_list: list[str],
+    sentinelle_ou_groups: dict[str, str],
     config: dict,
 ) -> None:
     """Downloads data elements for each period, with error handling and logging.
@@ -217,6 +276,8 @@ def _extract_data_elements_for_periods(
         dhis2_client (DHIS2): Connected DHIS2 client used to retrieve the data.
         periods (list[str]): Periods to extract, in YYYYMM format.
         org_unit_list (list[str]): Organisation unit IDs to extract data for.
+        sentinelle_ou_groups (dict[str, str]): Mapping of org unit ID -> group display name,
+            used to add the organisationUnitGroup column to each downloaded parquet.
         config (dict): Extraction configuration loaded from extract_config.json.
     """
     # Setup extractor
@@ -232,6 +293,17 @@ def _extract_data_elements_for_periods(
             )
             if not raw_data_path:
                 current_run.log_info(f"No data elements data for period {period}.")
+                continue
+
+            # Add organisationUnitGroup column to the downloaded parquet
+            df = pl.read_parquet(raw_data_path)
+            df = df.with_columns(
+                pl.col("org_unit")
+                .map_elements(lambda x: sentinelle_ou_groups.get(x), return_dtype=pl.String)
+                .alias("organisationUnitGroup")
+            )
+            df.write_parquet(raw_data_path)
+
     except Exception as e:
         raise Exception(f"Extract data elements error : {e}") from e  # let it crash!
 
