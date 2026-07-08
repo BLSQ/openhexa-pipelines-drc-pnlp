@@ -202,7 +202,7 @@ def transform_period(
 
     df = pl.read_parquet(extract_file).with_columns(pl.col("value").cast(pl.Float64, strict=False))
 
-    all_org_units = df.select(pl.col("org_unit").unique())
+    all_org_units = df.select(["org_unit", "organisationUnitGroup"]).unique(subset=["org_unit"])
     indicator_names = pl.DataFrame({"indicateur_name": [ind["indicateur_name"] for ind in indicator_mapping]})
     base = all_org_units.join(indicator_names, how="cross")
 
@@ -249,6 +249,7 @@ def transform_period(
         "zone_de_sante",
         "aire_de_sante",
         "fosa",
+        "organisationUnitGroup",
         "indicateur_num",
         "indicateur_den",
     )
