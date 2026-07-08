@@ -1,3 +1,4 @@
+import tempfile
 from pathlib import Path
 
 import polars as pl
@@ -76,7 +77,6 @@ def dhis2_nmdr_sentinel_extract(start_date: str, end_date: str, run_extract_data
     extract_periods = get_extract_periods(start, end)
 
     # Retrieve org units belonging to the two sentinelle groups
-    ## need to add something to tell ti to only extract data for the org units in my sentinelles groups -> check df = dataframe.get_organisation_unit_levels(dhis2)
     sentinelle_ou_list, sentinelle_ou_groups = get_sentinelle_org_units(dhis2_client)
     current_run.log_info(f"Found {len(sentinelle_ou_list)} sentinelle facilities across {len(SENTINELLE_OU_GROUPS)} groups.")
 
@@ -86,8 +86,7 @@ def dhis2_nmdr_sentinel_extract(start_date: str, end_date: str, run_extract_data
             dhis2_nmdr_client=dhis2_client,
             run_task=run_extract_data,
         )
-        extract_data(
-            pipeline_path=pipeline_path,
+        data_by_period = extract_data(
             extract_periods=extract_periods,
             config=config,
             dhis2_nmdr_client=dhis2_client,
@@ -106,7 +105,7 @@ def dhis2_nmdr_sentinel_extract(start_date: str, end_date: str, run_extract_data
     try:
         nmdr_sentinel_extract_paths = compile_nmdr_extracts(
             extract_periods=extract_periods,
-            data_path=pipeline_path / "data",
+            data_by_period=data_by_period,
             nmdr_extracts_path=pipelines_root / "dhis2_nmdr_sentinel_extract" / "data",
             output_path=pipeline_path / "data" / "nmdr_extracts",
             config_path=pipeline_path / "config",
@@ -118,7 +117,7 @@ def dhis2_nmdr_sentinel_extract(start_date: str, end_date: str, run_extract_data
     ## to delete because I will not share this data with another workspace
     try:
         update_nmdr_dataset(
-            new_extracts = nmdr_sentinel_extract_paths,
+            new_extracts=nmdr_sentinel_extract_paths,
             dataset_id="nmdr-sentinel-extracts",
             run_task=add_to_dataset,
         )
@@ -191,35 +190,33 @@ def extract_pyramid_metadata(pipeline_path: str, dhis2_nmdr_client: DHIS2, run_t
 
 
 def extract_data(
-    pipeline_path: str,
     extract_periods: list[str],
     config: dict,
     dhis2_nmdr_client: DHIS2,
     sentinelle_ou_list: list[str],
     sentinelle_ou_groups: dict[str, str],
     run_task: bool,
-) -> None:
+) -> dict[str, pl.DataFrame]:
     """Retrieves DHIS2 analytics data elements and reporting rates for the given periods.
 
     Args:
-        pipeline_path (str): Root path of the pipeline used to resolve input/output data folders.
         extract_periods (list[str]): Periods to extract, in YYYYMM format.
         config (dict): Extraction configuration loaded from extract_config.json.
         dhis2_nmdr_client (DHIS2): Connected DHIS2 client used to retrieve the data.
         sentinelle_ou_list (list[str]): Sentinelle org unit IDs to extract data for.
-            # => if possible move it outside this function, to be passed as a parameter to the main extract function extract_data
         sentinelle_ou_groups (dict[str, str]): Mapping of org unit ID -> group display name,
             used to add the organisationUnitGroup column to extracted data.
         run_task (bool): Whether to run this extraction step.
+
+    Returns:
+        dict[str, pl.DataFrame]: Extracted data keyed by period (YYYYMM). Empty if run_task is False.
     """
     if not run_task:
         current_run.log_info("Skipping data extraction as run_task is set to False.")
-        return
+        return {}
 
     current_run.log_info("Retrieving DHIS2 analytics data")
 
-    # retrieve FOSA ids from NMDR => to modify to take only df = dataframe.get_organisation_unit_levels(dhis2)
-    # => if possible move it outside this function, to be passed as a parameter to the main extract function extract_data
     fosa_list = sentinelle_ou_list
     current_run.log_info(f"Download MODE: {config['SETTINGS']['MODE']} for periods: {extract_periods}")
 
@@ -229,8 +226,7 @@ def extract_data(
     dhis2_nmdr_client.data_value_sets.MAX_DATA_ELEMENTS = 100
     dhis2_nmdr_client.data_value_sets.MAX_ORG_UNITS = 100
 
-    _extract_data_elements_for_periods(
-        pipeline_path=pipeline_path,
+    data_by_period = _extract_data_elements_for_periods(
         dhis2_client=dhis2_nmdr_client,
         periods=extract_periods,
         org_unit_list=fosa_list,
@@ -238,6 +234,7 @@ def extract_data(
         config=config,
     )
     current_run.log_info("Data elements extract finished.")
+    return data_by_period
 
 
 def _get_ou_list(pyramid_fname: Path, ou_level: int) -> list:
@@ -251,7 +248,6 @@ def _get_ou_list(pyramid_fname: Path, ou_level: int) -> list:
         list: Organisation unit IDs corresponding to the specified OU level.
     """
     try:
-        # Retrieve organisational units and filter by ou_level
         ous = pl.read_parquet(pyramid_fname)
         ou_list = ous.filter(pl.col("level") == ou_level)["id"].to_list()
     except Exception as e:
@@ -262,62 +258,71 @@ def _get_ou_list(pyramid_fname: Path, ou_level: int) -> list:
 
 
 def _extract_data_elements_for_periods(
-    pipeline_path: Path,
     dhis2_client: DHIS2,
     periods: list[str],
     org_unit_list: list[str],
     sentinelle_ou_groups: dict[str, str],
     config: dict,
-) -> None:
-    """Downloads data elements for each period, with error handling and logging.
+) -> dict[str, pl.DataFrame]:
+    """Downloads data elements for each period and returns them as in-memory DataFrames.
 
     Args:
-        pipeline_path (Path): Root path of the pipeline used to resolve the output data folder.
         dhis2_client (DHIS2): Connected DHIS2 client used to retrieve the data.
         periods (list[str]): Periods to extract, in YYYYMM format.
         org_unit_list (list[str]): Organisation unit IDs to extract data for.
         sentinelle_ou_groups (dict[str, str]): Mapping of org unit ID -> group display name,
             used to add the organisationUnitGroup column to each downloaded parquet.
         config (dict): Extraction configuration loaded from extract_config.json.
-    """
-    # Setup extractor
-    dhis2_extractor = DHIS2Extractor(dhis2_client=dhis2_client, download_mode=config["SETTINGS"]["MODE"])
-    try:
-        for period in periods:
-            raw_data_path = dhis2_extractor.data_elements.download_period(
-                data_elements=config["DATA_ELEMENTS"]["UIDS"],
-                org_units=org_unit_list,
-                period=period,
-                output_dir=pipeline_path / "data" / "data_elements",
-                filename=f"data_{period}.parquet",
-            )
-            if not raw_data_path:
-                current_run.log_info(f"No data elements data for period {period}.")
-                continue
 
-            # Add organisationUnitGroup column to the downloaded parquet
-            df = pl.read_parquet(raw_data_path)
-            df = df.with_columns(
-                pl.col("org_unit")
-                .map_elements(lambda x: sentinelle_ou_groups.get(x), return_dtype=pl.String)
-                .alias("organisationUnitGroup")
-            )
-            df.write_parquet(raw_data_path)
+    Returns:
+        dict[str, pl.DataFrame]: Extracted DataFrames keyed by period (YYYYMM).
+    """
+    dhis2_extractor = DHIS2Extractor(dhis2_client=dhis2_client, download_mode=config["SETTINGS"]["MODE"])
+    data_by_period: dict[str, pl.DataFrame] = {}
+
+    try:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            for period in periods:
+                raw_data_path = dhis2_extractor.data_elements.download_period(
+                    data_elements=config["DATA_ELEMENTS"]["UIDS"],
+                    org_units=org_unit_list,
+                    period=period,
+                    output_dir=Path(tmp_dir),
+                    filename=f"data_{period}.parquet",
+                )
+                if not raw_data_path:
+                    current_run.log_info(f"No data elements data for period {period}.")
+                    continue
+
+                # Read into memory and add organisationUnitGroup column, then let temp file be cleaned up
+                df = pl.read_parquet(raw_data_path)
+                df = df.with_columns(
+                    pl.col("org_unit")
+                    .map_elements(lambda x: sentinelle_ou_groups.get(x), return_dtype=pl.String)
+                    .alias("organisationUnitGroup")
+                )
+                data_by_period[period] = df
 
     except Exception as e:
-        raise Exception(f"Extract data elements error : {e}") from e  # let it crash!
+        raise Exception(f"Extract data elements error : {e}") from e
+
+    return data_by_period
 
 
 def compile_nmdr_extracts(
-    extract_periods: list[str], data_path: Path, nmdr_extracts_path: Path, output_path: Path, config_path: Path
+    extract_periods: list[str],
+    data_by_period: dict[str, pl.DataFrame],
+    nmdr_extracts_path: Path,
+    output_path: Path,
+    config_path: Path,
 ) -> list[Path]:
     """Collects and creates extracts based on the new extracts and searches for required data in nmdr extracts.
 
     Args:
         extract_periods (list[str]): Periods to compile, in YYYYMM format.
-        data_path (Path): Path to this pipeline's own extracted data.
+        data_by_period (dict[str, pl.DataFrame]): In-memory extracted DataFrames keyed by period.
         nmdr_extracts_path (Path): Path to the dhis2_nmdr_sentinel_extract pipeline's data.
-        output_path (Path): Path where the compiled nmr extracts are saved.
+        output_path (Path): Path where the compiled nmdr extracts are saved.
         config_path (Path): Path to the folder containing required_nmdr_ids.py.
 
     Returns:
@@ -327,12 +332,12 @@ def compile_nmdr_extracts(
     output_path.mkdir(parents=True, exist_ok=True)
 
     nmdr_extracts = []
-    nmdr_extracts.append(data_path / "pyramid_metadata" / "nmdr_pyramid_metadata.parquet")
+    nmdr_extracts.append(nmdr_extracts_path / "pyramid_metadata" / "nmdr_pyramid_metadata.parquet")
     req_de = load_required_dhis2_uids(config_path / "required_nmdr_ids.py")
 
     extract_path = collect_data_for_periods(
         periods=extract_periods,
-        source_path=data_path,
+        data_by_period=data_by_period,
         nmdr_extracts_path=nmdr_extracts_path,
         output_path=output_path,
         required_data_elements=req_de,
@@ -364,7 +369,7 @@ def load_required_dhis2_uids(identifiers_fname: Path) -> list[str]:
 
 def collect_data_for_periods(
     periods: list[str],
-    source_path: Path,
+    data_by_period: dict[str, pl.DataFrame],
     nmdr_extracts_path: Path,
     output_path: Path,
     required_data_elements: list,
@@ -373,7 +378,7 @@ def collect_data_for_periods(
 
     Args:
         periods (list[str]): Periods to compile, in YYYYMM format.
-        source_path (Path): Path to this pipeline's own extracted data.
+        data_by_period (dict[str, pl.DataFrame]): In-memory extracted DataFrames keyed by period.
         nmdr_extracts_path (Path): Path to the dhis2_nmdr_sentinel_extract pipeline's data.
         output_path (Path): Path where the compiled nmdr extracts are saved.
         required_data_elements (list): Data element UIDs to include from the NMDR extracts.
@@ -383,7 +388,6 @@ def collect_data_for_periods(
     """
     current_run.log_info(f"Compiling nmdr extract for period: {periods}..")
 
-    # Set up the schema for the extract DataFrame
     extract_schema = {
         "data_type": pl.String,
         "dx": pl.String,
@@ -403,7 +407,7 @@ def collect_data_for_periods(
 
         data_elements_df = _collect_data_elements_for_period(
             period=period,
-            source_path=source_path / "data_elements",
+            source_df=data_by_period.get(period),
             nmdr_extract=nmdr_df,
             nmdr_required_de=required_data_elements,
             schema=extract_schema,
@@ -424,15 +428,19 @@ def collect_data_for_periods(
 
 
 def _collect_data_elements_for_period(
-    period: str, source_path: Path, nmdr_extract: pl.DataFrame, nmdr_required_de: list, schema: dict
+    period: str,
+    source_df: pl.DataFrame | None,
+    nmdr_extract: pl.DataFrame,
+    nmdr_required_de: list,
+    schema: dict,
 ) -> pl.DataFrame:
-    """Collects data elements for a given period from the source path and appends them to the provided DataFrame.
+    """Collects data elements for a given period from the in-memory DataFrame and appends them to the result.
 
     Also searches for additional data elements in the NMDR extracts and appends them to the DataFrame.
 
     Args:
         period (str): Period to collect, in YYYYMM format.
-        source_path (Path): Path to the local pipeline data folder for data elements.
+        source_df (pl.DataFrame | None): In-memory DataFrame for this period, or None if not available.
         nmdr_extract (pl.DataFrame): nmdr extract data to search for additional data elements.
         nmdr_required_de (list): Data element UIDs to include from the nmdr extract.
         schema (dict): Polars schema used to cast the collected data.
@@ -440,13 +448,11 @@ def _collect_data_elements_for_period(
     Returns:
         pl.DataFrame: Collected data elements for the specified period.
     """
-    # Search in local pipeline data folder
     data_elements_df = pl.DataFrame(schema=schema)
-    data_elements_file = next(source_path.glob(f"data_{period}.parquet"), None)
-    if data_elements_file:
-        data_elements_df = pl.read_parquet(data_elements_file).cast(schema)
+    if source_df is not None:
+        data_elements_df = source_df.cast(schema)
 
-    # Search for the additional data elements in parquet files in the nmdr folder
+    # Search for the additional data elements in the nmdr folder
     if not nmdr_extract.is_empty():
         nmdr_de_df = nmdr_extract.filter(
             (pl.col("data_type") == "DATA_ELEMENT") & pl.col("dx").is_in(nmdr_required_de)
