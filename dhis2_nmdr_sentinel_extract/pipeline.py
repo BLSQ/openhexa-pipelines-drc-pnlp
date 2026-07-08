@@ -7,7 +7,6 @@ from openhexa.sdk import current_run, parameter, pipeline, workspace
 from openhexa.toolbox.dhis2 import DHIS2
 from openhexa.toolbox.dhis2.dataframe import get_organisation_unit_groups, get_organisation_units
 from utils import (
-    add_files_to_dataset,
     connect_to_dhis2,
     get_extract_periods,
     load_configuration,
@@ -49,21 +48,13 @@ SENTINELLE_OU_GROUPS = {
     default=True,
     help="Extract data elements from NMDR.",
 )
-@parameter(
-    code="add_to_dataset",
-    name="Add extracted data to dataset.",
-    type=bool,
-    default=True,
-    help="Add extracts created in this run to the  dataset.",
-)
-def dhis2_nmdr_sentinel_extract(start_date: str, end_date: str, run_extract_data: bool, add_to_dataset: bool):
-    """Orchestrates the NMDR Sentinel monthly extraction, compilation, and dataset update.
+def dhis2_nmdr_sentinel_extract(start_date: str, end_date: str, run_extract_data: bool):
+    """Orchestrates the NMDR Sentinel monthly extraction and compilation into parquet files.
 
     Args:
         start_date (str): Start date for data extraction in YYYYMM format.
         end_date (str): End date for data extraction in YYYYMM format.
         run_extract_data (bool): Whether to run the DHIS2 data extraction step.
-        add_to_dataset (bool): Whether to push the compiled extracts to the OpenHEXA dataset.
     """
     pipelines_root = Path(workspace.files_path) / "pipelines"
     pipeline_path = pipelines_root / "dhis2_nmdr_sentinel_extract"
@@ -101,9 +92,8 @@ def dhis2_nmdr_sentinel_extract(start_date: str, end_date: str, run_extract_data
         current_run.log_error(f"An error occurred: {e}")
         raise
 
-    ## to delete because I don't need to copy the data to nmdr_extract - update transform pipelie to task to read from there
     try:
-        nmdr_sentinel_extract_paths = compile_nmdr_extracts(
+        compile_nmdr_extracts(
             extract_periods=extract_periods,
             data_by_period=data_by_period,
             nmdr_extracts_path=pipelines_root / "dhis2_nmdr_sentinel_extract" / "data",
@@ -112,18 +102,6 @@ def dhis2_nmdr_sentinel_extract(start_date: str, end_date: str, run_extract_data
         )
     except Exception as e:
         current_run.log_error(f"An error while compiling data: {e}")
-        raise
-
-    ## to delete because I will not share this data with another workspace
-    try:
-        update_nmdr_dataset(
-            new_extracts=nmdr_sentinel_extract_paths,
-            dataset_id="nmdr-sentinel-extracts",
-            run_task=add_to_dataset,
-        )
-        current_run.log_info("Dataset updated successfully.")
-    except Exception as e:
-        current_run.log_error(f"An error occurred while updating the dataset: {e}")
         raise
 
     ## add a new task to transform the data try function -> except rise error and log to say data has been transformed/extracted,
@@ -481,31 +459,6 @@ def collect_population_data_for_periods(extract_periods: list[str], nmdr_extract
         else:
             current_run.log_info(f"No population data found for period {period}.")
     return pop_paths
-
-
-def update_nmdr_dataset(new_extracts: list[Path], dataset_id: str, run_task: bool) -> None:
-    """Updates the NMDR dataset with the new extracts.
-
-    Args:
-        new_extracts (list[Path]): Paths of the new extract files to push to the dataset.
-        dataset_id (str): OpenHEXA dataset identifier to update.
-        run_task (bool): Whether to run this update step.
-    """
-    if not run_task:
-        return
-
-    if not new_extracts:
-        current_run.log_info("No new extracts to update in the dataset.")
-        return
-
-    try:
-        add_files_to_dataset(
-            dataset_id=dataset_id,
-            file_paths=new_extracts,
-            ds_version_prefix="nmdr_mensuel",
-        )
-    except Exception as e:
-        raise Exception(f"Error while updating NMDR dataset: {e}") from e
 
 
 if __name__ == "__main__":
