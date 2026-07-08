@@ -15,7 +15,7 @@ from utils import get_extract_periods, resolve_dates_and_validate, save_to_parqu
 @parameter(
     code="start_period",
     name="Start period (format: YYYYMM)",
-    default="202605",
+    default="202606",
     type=str,
     required=False,
     help="First period to transform, in YYYYMM format.",
@@ -23,7 +23,7 @@ from utils import get_extract_periods, resolve_dates_and_validate, save_to_parqu
 @parameter(
     code="end_period",
     name="End period (format: YYYYMM)",
-    default="202605",
+    default="202606",
     type=str,
     required=False,
     help="Last period to transform, in YYYYMM format. If equal to start_period, only one period is processed.",

@@ -1,4 +1,3 @@
-import json
 import tempfile
 from pathlib import Path
 
@@ -7,7 +6,19 @@ from d2d_development.extract import DHIS2Extractor
 from openhexa.sdk import current_run, parameter, pipeline, workspace
 from openhexa.toolbox.dhis2 import DHIS2
 from openhexa.toolbox.dhis2.dataframe import get_organisation_unit_groups, get_organisation_units
-from utils import connect_to_dhis2, get_extract_periods, load_configuration, resolve_dates_and_validate, save_to_parquet
+from utils import (
+    connect_to_dhis2,
+    get_extract_periods,
+    load_configuration,
+    resolve_dates_and_validate,
+    save_to_parquet,
+)
+
+# Sentinelle org unit groups: maps group ID -> display name
+SENTINELLE_OU_GROUPS = {
+    "qTZ3L6pLMTi": "CS Site Sentinelle",
+    "wldxDI2Ey5c": "HGR Site Sentinelle",
+}
 
 
 @pipeline("dhis2_nmdr_sentinel_extract", timeout=21600)  # 6 hours
@@ -25,144 +36,76 @@ from utils import connect_to_dhis2, get_extract_periods, load_configuration, res
 @parameter(
     code="end_date",
     name="End date (format: YYYYMM)",
-    default="202606",
+    default="202605",
     type=str,
     required=False,
-    help="End date for data extraction in YYYYMM format. If not set, it will default to current date minus 1.",
+    help=("End date for data extraction in YYYYMM format. If not set, it will default to current date minus 1."),
 )
 @parameter(
-    code="mode",
-    name="Mode",
-    type=str,
-    required=False,
-    default=None,
-    choices=["extract", "transform"],
-    help=(
-        "Controls which steps to run. "
-        "'extract' runs only the DHIS2 extraction. "
-        "'transform' runs only the indicator transformation. "
-        "Leave empty to run both steps (default)."
-    ),
-)
-@parameter(
-    code="fill_missing_with_zero",
-    name="Fill missing num/den with 0",
+    code="run_extract_data",
+    name="Extract data",
     type=bool,
     default=True,
-    help=(
-        "If a facility has no reported value at all for an indicator's numerator or denominator "
-        "data elements in a period, fill it with 0 instead of leaving it null."
-    ),
+    help="Extract data elements from NMDR.",
 )
-def dhis2_nmdr_sentinel_extract(start_date: str, end_date: str, mode: str | None, fill_missing_with_zero: bool):
-    """Orchestrates the NMDR Sentinel monthly extraction and transformation into indicator parquet files.
-
-    Runs extraction, transformation, or both depending on the `mode` parameter.
+def dhis2_nmdr_sentinel_extract(start_date: str, end_date: str, run_extract_data: bool):
+    """Orchestrates the NMDR Sentinel monthly extraction and compilation into parquet files.
 
     Args:
-        start_date (str): Start date for data extraction/transformation in YYYYMM format.
-        end_date (str): End date for data extraction/transformation in YYYYMM format.
-        mode (str | None): 'extract' to only extract, 'transform' to only transform,
-            or None (default) to run both steps in sequence.
-        fill_missing_with_zero (bool): Whether to fill missing num/den sums with 0 instead of null.
+        start_date (str): Start date for data extraction in YYYYMM format.
+        end_date (str): End date for data extraction in YYYYMM format.
+        run_extract_data (bool): Whether to run the DHIS2 data extraction step.
     """
-    print(f">>> mode={mode}, start={start_date}, end={end_date}")
-    print(f">>> workspace.files_path={workspace.files_path}")
-    run_extract = mode in (None, "extract")
-    run_transform = mode in (None, "transform")
-
     pipelines_root = Path(workspace.files_path) / "pipelines"
     pipeline_path = pipelines_root / "dhis2_nmdr_sentinel_extract"
 
-    # Load configuration and connect to DHIS2 (needed for extract; also used for date validation)
+    # Load configuration and connect to DHIS2
     config = load_configuration(pipeline_path / "config" / "extract_config.json")
+    dhis2_client = connect_to_dhis2(connection_str=config["SETTINGS"]["DHIS2_CONNECTION"])
+
+    # get dates and validate
     start, end = resolve_dates_and_validate(start_date, end_date, config)
-    periods = get_extract_periods(start, end)
+    extract_periods = get_extract_periods(start, end)
 
-    # --- EXTRACT ---
-    if run_extract:
-        dhis2_client = connect_to_dhis2(connection_str=config["SETTINGS"]["DHIS2_CONNECTION"])
+    # Retrieve org units belonging to the two sentinelle groups
+    sentinelle_ou_list, sentinelle_ou_groups = get_sentinelle_org_units(dhis2_client)
+    current_run.log_info(f"Found {len(sentinelle_ou_list)} sentinelle facilities across {len(SENTINELLE_OU_GROUPS)} groups.")
 
-        sentinelle_ou_list, sentinelle_ou_groups = get_sentinelle_org_units(dhis2_client)
-        current_run.log_info(
-            f"Found {len(sentinelle_ou_list)} sentinelle facilities across {len(SENTINELLE_OU_GROUPS)} groups."
+    try:
+        extract_pyramid_metadata(
+            pipeline_path=pipeline_path,
+            dhis2_nmdr_client=dhis2_client,
+            run_task=run_extract_data,
+        )
+        data_by_period = extract_data(
+            extract_periods=extract_periods,
+            config=config,
+            dhis2_nmdr_client=dhis2_client,
+            sentinelle_ou_list=sentinelle_ou_list,
+            sentinelle_ou_groups=sentinelle_ou_groups,
+            run_task=run_extract_data,
         )
 
-        try:
-            extract_pyramid_metadata(
-                pipeline_path=pipeline_path,
-                dhis2_nmdr_client=dhis2_client,
-                run_task=True,
-            )
-            data_by_period = extract_data(
-                extract_periods=periods,
-                config=config,
-                dhis2_nmdr_client=dhis2_client,
-                sentinelle_ou_list=sentinelle_ou_list,
-                sentinelle_ou_groups=sentinelle_ou_groups,
-                run_task=True,
-            )
-            current_run.log_info("Data extracted successfully.")
-        except Exception as e:
-            current_run.log_error(f"An error occurred during extraction: {e}")
-            raise
+        current_run.log_info("Data extracted successfully.")
 
-        try:
-            compile_nmdr_extracts(
-                extract_periods=periods,
-                data_by_period=data_by_period,
-                nmdr_extracts_path=pipelines_root / "dhis2_nmdr_sentinel_extract" / "data",
-                output_path=pipeline_path / "data" / "nmdr_extracts",
-                config_path=pipeline_path / "config",
-            )
-        except Exception as e:
-            current_run.log_error(f"An error while compiling data: {e}")
-            raise
+    except Exception as e:
+        current_run.log_error(f"An error occurred: {e}")
+        raise
 
-    # --- TRANSFORM ---
-    if run_transform:
-        extracts_path = pipeline_path / "data" / "nmdr_extracts"
-        pyramid_path = pipeline_path / "data" / "pyramid_metadata" / "nmdr_pyramid_metadata.parquet"
-        output_path = pipeline_path / "data" / "nmdr_transforms"
-        mapping_path = pipeline_path / "config" / "indicator_mapping.json"
+    try:
+        compile_nmdr_extracts(
+            extract_periods=extract_periods,
+            data_by_period=data_by_period,
+            nmdr_extracts_path=pipelines_root / "dhis2_nmdr_sentinel_extract" / "data",
+            output_path=pipeline_path / "data" / "nmdr_extracts",
+            config_path=pipeline_path / "config",
+        )
+    except Exception as e:
+        current_run.log_error(f"An error while compiling data: {e}")
+        raise
 
-        current_run.log_info(f"Transforming NMDR sentinel data for periods: {periods}")
-
-        try:
-            indicator_mapping = load_indicator_mapping(mapping_path)
-            fosa_names = load_fosa_names(pyramid_path)
-
-            output_path.mkdir(parents=True, exist_ok=True)
-            transformed_files = []
-
-            for period in periods:
-                transformed_path = transform_period(
-                    period=period,
-                    extracts_path=extracts_path,
-                    indicator_mapping=indicator_mapping,
-                    fosa_names=fosa_names,
-                    output_path=output_path,
-                    fill_missing_with_zero=fill_missing_with_zero,
-                )
-                if transformed_path:
-                    transformed_files.append(transformed_path)
-
-            current_run.log_info(f"Transform finished. Files created: {transformed_files}")
-        except Exception as e:
-            current_run.log_error(f"An error occurred during transformation: {e}")
-            raise
-
-
-# =============================================================================
-# EXTRACT FUNCTIONS
-# =============================================================================
-
-
-# Sentinelle org unit groups: maps group ID -> display name
-SENTINELLE_OU_GROUPS = {
-    "qTZ3L6pLMTi": "CS Site Sentinelle",
-    "wldxDI2Ey5c": "HGR Site Sentinelle",
-}
+    ## add a new task to transform the data try function -> except rise error and log to say data has been transformed/extracted,
+    # add parameter to sometimes only run extract  or only run transform, or both
 
 
 def get_sentinelle_org_units(dhis2_client: DHIS2) -> tuple[list[str], dict[str, str]]:
@@ -211,12 +154,14 @@ def extract_pyramid_metadata(pipeline_path: str, dhis2_nmdr_client: DHIS2, run_t
     current_run.log_info("Retrieving NMDR DHIS2 pyramid metadata")
 
     try:
+        # retrieve full pyramid
         org_units = get_organisation_units(dhis2_nmdr_client).drop("geometry")
         org_units = org_units.filter(pl.col("level") == 5)
         current_run.log_info(f"{len(org_units['id'].unique())} units at organisation unit level: 5")
     except Exception as e:
         raise Exception(f"Error while extracting NMDR DHIS2 Pyramid: {e}") from e
 
+    # Save as Parquet
     pyramid_path = pipeline_path / "data" / "pyramid_metadata"
     save_to_parquet(data=org_units, filename=pyramid_path / "nmdr_pyramid_metadata.parquet")
     current_run.log_info(f"NMDR DHIS2 pyramid metadata saved: {pyramid_path / 'nmdr_pyramid_metadata.parquet'}")
@@ -253,6 +198,7 @@ def extract_data(
     fosa_list = sentinelle_ou_list
     current_run.log_info(f"Download MODE: {config['SETTINGS']['MODE']} for periods: {extract_periods}")
 
+    # limits
     dhis2_nmdr_client.analytics.MAX_DX = 100
     dhis2_nmdr_client.analytics.MAX_ORG_UNITS = 100
     dhis2_nmdr_client.data_value_sets.MAX_DATA_ELEMENTS = 100
@@ -326,6 +272,7 @@ def _extract_data_elements_for_periods(
                     current_run.log_info(f"No data elements data for period {period}.")
                     continue
 
+                # Read into memory and add organisationUnitGroup column, then let temp file be cleaned up
                 df = pl.read_parquet(raw_data_path)
                 df = df.with_columns(
                     pl.col("org_unit")
@@ -483,6 +430,7 @@ def _collect_data_elements_for_period(
     if source_df is not None:
         data_elements_df = source_df.cast(schema)
 
+    # Search for the additional data elements in the nmdr folder
     if not nmdr_extract.is_empty():
         nmdr_de_df = nmdr_extract.filter(
             (pl.col("data_type") == "DATA_ELEMENT") & pl.col("dx").is_in(nmdr_required_de)
@@ -511,176 +459,6 @@ def collect_population_data_for_periods(extract_periods: list[str], nmdr_extract
         else:
             current_run.log_info(f"No population data found for period {period}.")
     return pop_paths
-
-
-# =============================================================================
-# TRANSFORM FUNCTIONS
-# =============================================================================
-
-
-def load_indicator_mapping(mapping_path: Path) -> list[dict]:
-    """Loads the indicator numerator/denominator dx mapping from a JSON config file.
-
-    Args:
-        mapping_path (Path): Path to indicator_mapping.json.
-
-    Returns:
-        list[dict]: Each dict has keys 'indicateur_name', 'num_dx' (list[str]), 'den_dx' (list[str]).
-    """
-    if not mapping_path.exists():
-        sibling_files = (
-            sorted(p.name for p in mapping_path.parent.iterdir())
-            if mapping_path.parent.exists()
-            else ["<parent folder does not exist>"]
-        )
-        raise FileNotFoundError(
-            f"indicator_mapping.json not found at {mapping_path}. "
-            f"Files actually present in {mapping_path.parent}: {sibling_files}. "
-            "If it's missing here, make sure the file exists on local disk at this exact path "
-            "(not only in the OpenHEXA workspace file browser)."
-        )
-
-    with open(mapping_path, encoding="utf-8") as f:
-        mapping = json.load(f)
-    current_run.log_info(f"Loaded {len(mapping)} indicator definitions from {mapping_path}")
-    return mapping
-
-
-GEO_SCHEMA = {
-    "org_unit": pl.String,
-    "fosa": pl.String,
-    "province": pl.String,
-    "zone_de_sante": pl.String,
-    "aire_de_sante": pl.String,
-}
-
-
-def load_fosa_names(pyramid_path: Path) -> pl.DataFrame:
-    """Loads the org_unit id -> name/geo-hierarchy mapping from the pyramid metadata parquet.
-
-    Args:
-        pyramid_path (Path): Path to nmdr_pyramid_metadata.parquet.
-
-    Returns:
-        pl.DataFrame: Columns ['org_unit', 'fosa', 'province', 'zone_de_sante', 'aire_de_sante'].
-            Empty if the pyramid file is not found or missing the expected level_*_name columns.
-    """
-    if not pyramid_path.exists():
-        current_run.log_info(
-            f"No pyramid metadata found at {pyramid_path}. 'fosa' will fall back to org_unit id, "
-            "and 'province'/'zone_de_sante'/'aire_de_sante' will be null."
-        )
-        return pl.DataFrame(schema=GEO_SCHEMA)
-
-    pyramid = pl.read_parquet(pyramid_path)
-
-    missing_cols = [c for c in ("level_2_name", "level_3_name", "level_4_name") if c not in pyramid.columns]
-    if missing_cols:
-        current_run.log_info(
-            f"Pyramid metadata at {pyramid_path} is missing expected column(s) {missing_cols}. "
-            "'province'/'zone_de_sante'/'aire_de_sante' will be null for rows they can't be resolved for. "
-            f"Available columns: {pyramid.columns}"
-        )
-
-    return pyramid.select(
-        pl.col("id").alias("org_unit"),
-        pl.col("name").alias("fosa"),
-        (pl.col("level_2_name") if "level_2_name" in pyramid.columns else pl.lit(None, dtype=pl.String)).alias(
-            "province"
-        ),
-        (pl.col("level_3_name") if "level_3_name" in pyramid.columns else pl.lit(None, dtype=pl.String)).alias(
-            "zone_de_sante"
-        ),
-        (pl.col("level_4_name") if "level_4_name" in pyramid.columns else pl.lit(None, dtype=pl.String)).alias(
-            "aire_de_sante"
-        ),
-    )
-
-
-def transform_period(
-    period: str,
-    extracts_path: Path,
-    indicator_mapping: list[dict],
-    fosa_names: pl.DataFrame,
-    output_path: Path,
-    fill_missing_with_zero: bool,
-) -> Path | None:
-    """Transforms a single period's NMDR extract into indicator numerator/denominator rows.
-
-    Args:
-        period (str): Period to transform, in YYYYMM format.
-        extracts_path (Path): Path to the folder containing nmdr_extract_<period>.parquet files.
-        indicator_mapping (list[dict]): Indicator definitions (name, num_dx, den_dx).
-        fosa_names (pl.DataFrame): org_unit id -> fosa name lookup table.
-        output_path (Path): Folder where nmdr_transform_<period>.parquet is written.
-        fill_missing_with_zero (bool): Whether to fill missing num/den sums with 0.
-
-    Returns:
-        Path | None: Path to the written parquet file, or None if there was no extract for the period.
-    """
-    extract_file = extracts_path / f"nmdr_extract_{period}.parquet"
-    if not extract_file.exists():
-        current_run.log_info(f"No extract found for period {period} at {extract_file}. Skipping.")
-        return None
-
-    df = pl.read_parquet(extract_file).with_columns(pl.col("value").cast(pl.Float64, strict=False))
-
-    all_org_units = df.select(["org_unit", "organisationUnitGroup"]).unique(subset=["org_unit"])
-    indicator_names = pl.DataFrame({"indicateur_name": [ind["indicateur_name"] for ind in indicator_mapping]})
-    base = all_org_units.join(indicator_names, how="cross")
-
-    num_frames = []
-    den_frames = []
-    for indicator in indicator_mapping:
-        num_frames.append(
-            df.filter(pl.col("dx").is_in(indicator["num_dx"]))
-            .group_by("org_unit")
-            .agg(pl.col("value").sum().alias("indicateur_num"))
-            .with_columns(pl.lit(indicator["indicateur_name"]).alias("indicateur_name"))
-        )
-        den_frames.append(
-            df.filter(pl.col("dx").is_in(indicator["den_dx"]))
-            .group_by("org_unit")
-            .agg(pl.col("value").sum().alias("indicateur_den"))
-            .with_columns(pl.lit(indicator["indicateur_name"]).alias("indicateur_name"))
-        )
-
-    num_df = pl.concat(num_frames) if num_frames else pl.DataFrame(schema={"org_unit": pl.String, "indicateur_name": pl.String, "indicateur_num": pl.Float64})
-    den_df = pl.concat(den_frames) if den_frames else pl.DataFrame(schema={"org_unit": pl.String, "indicateur_name": pl.String, "indicateur_den": pl.Float64})
-
-    result = (
-        base.join(num_df, on=["org_unit", "indicateur_name"], how="left")
-        .join(den_df, on=["org_unit", "indicateur_name"], how="left")
-        .join(fosa_names, on="org_unit", how="left")
-    )
-
-    if fill_missing_with_zero:
-        result = result.with_columns(
-            pl.col("indicateur_num").fill_null(0.0),
-            pl.col("indicateur_den").fill_null(0.0),
-        )
-
-    result = result.with_columns(
-        pl.lit(f"{period[0:4]}-{period[4:6]}").alias("period"),
-        pl.lit(period[0:4]).alias("annee"),
-        pl.coalesce(pl.col("fosa"), pl.col("org_unit")).alias("fosa"),
-    ).select(
-        "period",
-        "annee",
-        "indicateur_name",
-        "province",
-        "zone_de_sante",
-        "aire_de_sante",
-        "fosa",
-        "organisationUnitGroup",
-        "indicateur_num",
-        "indicateur_den",
-    )
-
-    output_file = output_path / f"nmdr_transform_{period}.parquet"
-    save_to_parquet(data=result, filename=output_file)
-    current_run.log_info(f"NMDR transform for period {period} saved at {output_file}")
-    return output_file
 
 
 if __name__ == "__main__":
