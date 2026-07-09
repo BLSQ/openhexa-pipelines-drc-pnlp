@@ -256,9 +256,9 @@ def update_last_run_timestamp(timestamp_filename: Path, dataset_id: str) -> None
             file_path=timestamp_filename,
             contents={"LAST_UPDATE": timestamp.strftime("%Y%m%d_%H%M")},
         )
+        current_run.log_info(f"Last run timestamp updated to: {timestamp.strftime('%Y%m%d_%H%M')}")
     except Exception as e:
         current_run.log_error(f"Error updating last run timestamp: {e}")
-    current_run.log_info(f"Last run timestamp updated to: {timestamp.strftime('%Y%m%d_%H%M')}")
 
 
 if __name__ == "__main__":
