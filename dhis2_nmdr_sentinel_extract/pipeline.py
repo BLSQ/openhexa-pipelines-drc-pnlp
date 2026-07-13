@@ -306,7 +306,7 @@ def transform_step(
         mapping (dict): Mappings between indicators to be calculated and num and den components.
     """
     try:
-        fosa_names = load_fosa_names(pyramid_path)
+        fosa_names = load_fosa_names(pyramid_path / "nmdr_pyramid_metadata.parquet")
 
         periods = sorted(
         file.stem[-6:]
@@ -329,45 +329,39 @@ def transform_step(
         raise
 
 
-def load_fosa_names(pyramid_path: Path) -> pl.DataFrame:
+def load_fosa_names(pyramid_file: Path) -> pl.DataFrame:
     """Loads the org_unit id -> name/geo-hierarchy mapping from the pyramid metadata parquet.
 
     Args:
-        pyramid_path (Path): Path to nmdr_pyramid_metadata.parquet.
+        pyramid_file (Path): Path to nmdr_pyramid_metadata.parquet.
 
     Returns:
         pl.DataFrame: Columns ['org_unit', 'fosa', 'province', 'zone_de_sante', 'aire_de_sante'].
-            Empty if the pyramid file is not found or missing the expected level_*_name columns.
+
+    Raises:
+        Exception: If the pyramid file is not found or is missing expected columns.
     """
-    if not pyramid_path.exists():
-        current_run.log_info(
-            f"No pyramid metadata found at {pyramid_path}. 'fosa' will fall back to org_unit id, "
-            "and 'province'/'zone_de_sante'/'aire_de_sante' will be null."
+    if not pyramid_file.is_file():
+        raise Exception(
+            f"Pyramid metadata not found at {pyramid_file}. Run the extract step first."
         )
-        return pl.DataFrame(schema=GEO_SCHEMA)
 
-    pyramid = pl.read_parquet(pyramid_path)
+    pyramid = pl.read_parquet(pyramid_file)
 
-    missing_cols = [c for c in ("level_2_name", "level_3_name", "level_4_name") if c not in pyramid.columns]
+    expected_cols = ("id", "name", "level_2_name", "level_3_name", "level_4_name")
+    missing_cols = [c for c in expected_cols if c not in pyramid.columns]
     if missing_cols:
-        current_run.log_info(
-            f"Pyramid metadata at {pyramid_path} is missing expected column(s) {missing_cols}. "
-            "'province'/'zone_de_sante'/'aire_de_sante' will be null for rows they can't be resolved for. "
+        raise Exception(
+            f"Pyramid metadata at {pyramid_file} is missing expected column(s) {missing_cols}. "
             f"Available columns: {pyramid.columns}"
         )
 
     return pyramid.select(
         pl.col("id").alias("org_unit"),
         pl.col("name").alias("fosa"),
-        (pl.col("level_2_name") if "level_2_name" in pyramid.columns else pl.lit(None, dtype=pl.String)).alias(
-            "province"
-        ),
-        (pl.col("level_3_name") if "level_3_name" in pyramid.columns else pl.lit(None, dtype=pl.String)).alias(
-            "zone_de_sante"
-        ),
-        (pl.col("level_4_name") if "level_4_name" in pyramid.columns else pl.lit(None, dtype=pl.String)).alias(
-            "aire_de_sante"
-        ),
+        pl.col("level_2_name").alias("province"),
+        pl.col("level_3_name").alias("zone_de_sante"),
+        pl.col("level_4_name").alias("aire_de_sante"),
     )
 
 
