@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import polars as pl
@@ -5,6 +6,7 @@ from d2d_development.extract import DHIS2Extractor
 from openhexa.sdk import current_run, parameter, pipeline, workspace
 from openhexa.toolbox.dhis2 import DHIS2
 from openhexa.toolbox.dhis2.dataframe import get_organisation_unit_groups, get_organisation_units
+from sqlalchemy import create_engine, text
 from utils import (
     connect_to_dhis2,
     get_extract_periods,
@@ -107,7 +109,6 @@ def dhis2_nmdr_sentinel_extract(start_date: str, end_date: str, extract: bool, t
     if transform_load:
         try:
             transform_step(
-                pipeline_path=pipeline_path,
                 pyramid_path=pyramid_path,
                 org_units_group_path=org_units_group_path,
                 extract_path=extract_path,
@@ -117,6 +118,18 @@ def dhis2_nmdr_sentinel_extract(start_date: str, end_date: str, extract: bool, t
             current_run.log_info("Data transformed successfully.")
         except Exception as e:
             current_run.log_error(f"An error occurred during transformation: {e}")
+            raise
+
+
+    # --- LOAD ---
+    if transform_load:
+        try:
+            load_step(
+                transform_path=transform_path,
+            )
+            current_run.log_info("Data loaded successfully.")
+        except Exception as e:
+            current_run.log_error(f"An error occurred during loading: {e}")
             raise
 
 
@@ -276,7 +289,6 @@ def extract_data_elements_for_periods(
 
 
 def transform_step(
-    pipeline_path: Path,
     pyramid_path: Path,
     org_units_group_path: Path,
     extract_path: Path,
@@ -289,7 +301,6 @@ def transform_step(
     regardless of the pipeline's start/end date parameters.
 
     Args:
-        pipeline_path (Path): Root path of the pipeline.
         pyramid_path (Path): Root path for the pyramid metadata.
         org_units_group_path (Path): Root path for the Org Units per group metadata.
         extract_path (Path): Root path for the extracted files to be transformed.
@@ -427,6 +438,68 @@ def transform_period(
     output_file = transform_path / f"nmdr_transform_{period}.parquet"
     save_to_parquet(data=result, filename=output_file)
     current_run.log_info(f"NMDR transform for period {period} saved at {output_file}")
+
+# =============================================================================
+# LOAD FUNCTIONS
+# =============================================================================
+
+
+def load_step(
+    transform_path: Path,
+) -> None:
+    """Loads the transformed NMDR data into the public.nmdr_sentinelles_test table.
+
+    Truncates the target table and appends every nmdr_transform_YYYYMM.parquet file
+    found in transform_path. If no transform files exist, the table is left untouched.
+
+    Args:
+        transform_path (Path): Root path containing the transformed parquet files to load.
+    """
+    table_name = "nmdr_sentinelles_test"
+
+    expected_columns = [
+        "period", "annee", "indicateur_name", "province",
+        "zone_de_sante", "aire_de_sante", "fosa", "organisationUnitGroup",
+        "indicateur_num", "indicateur_den",
+    ]
+
+    transform_files = sorted(transform_path.glob("nmdr_transform_*.parquet"))
+
+    if not transform_files:
+        current_run.log_info(f"No transform files found in {transform_path}. Nothing to load.")
+        return
+
+    engine = create_engine(os.environ["WORKSPACE_DATABASE_URL"])
+
+    with engine.begin() as conn:
+        conn.execute(text(f"TRUNCATE TABLE public.{table_name};"))
+    current_run.log_info(f"Table public.{table_name} truncated.")
+
+    total_rows = 0
+    for transform_file in transform_files:
+        df = pl.read_parquet(transform_file).to_pandas()
+
+        missing = set(expected_columns) - set(df.columns)
+        if missing:
+            raise ValueError(f"{transform_file.name} is missing expected columns: {missing}")
+        df = df[expected_columns]
+
+        df.to_sql(
+            table_name,
+            engine,
+            schema="public",
+            if_exists="append",
+            index=False,
+            chunksize=10_000,
+            method="multi",
+        )
+        total_rows += len(df)
+        current_run.log_info(f"Loaded {len(df):,} rows from {transform_file.name}")
+
+    current_run.log_info(
+        f"DHIS2 indicators data loaded successfully. "
+        f"{total_rows:,} rows loaded into public.{table_name}."
+    )
 
 
 if __name__ == "__main__":
