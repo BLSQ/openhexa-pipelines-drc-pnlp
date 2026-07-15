@@ -120,7 +120,6 @@ def dhis2_nmdr_sentinel_extract(start_date: str, end_date: str, extract: bool, t
             current_run.log_error(f"An error occurred during transformation: {e}")
             raise
 
-
     # --- LOAD ---
     if transform_load:
         try:
@@ -457,12 +456,6 @@ def load_step(
     """
     table_name = "nmdr_sentinelles_test"
 
-    expected_columns = [
-        "period", "annee", "indicateur_name", "province",
-        "zone_de_sante", "aire_de_sante", "fosa", "organisationUnitGroup",
-        "indicateur_num", "indicateur_den",
-    ]
-
     transform_files = sorted(transform_path.glob("nmdr_transform_*.parquet"))
 
     if not transform_files:
@@ -477,30 +470,21 @@ def load_step(
 
     total_rows = 0
     for transform_file in transform_files:
-        df = pl.read_parquet(transform_file).to_pandas()
+        df = pl.read_parquet(transform_file)
 
-        missing = set(expected_columns) - set(df.columns)
-        if missing:
-            raise ValueError(f"{transform_file.name} is missing expected columns: {missing}")
-        df = df[expected_columns]
-
-        df.to_sql(
-            table_name,
-            engine,
-            schema="public",
-            if_exists="append",
-            index=False,
-            chunksize=10_000,
-            method="multi",
+        df.write_database(
+            table_name=f"public.{table_name}",
+            connection=engine,
+            if_table_exists="append",
         )
-        total_rows += len(df)
-        current_run.log_info(f"Loaded {len(df):,} rows from {transform_file.name}")
+        total_rows += df.height
+        current_run.log_info(f"Loaded {df.height:,} rows from {transform_file.name}")
 
     current_run.log_info(
         f"DHIS2 indicators data loaded successfully. "
         f"{total_rows:,} rows loaded into public.{table_name}."
     )
-
+    
 
 if __name__ == "__main__":
     dhis2_nmdr_sentinel_extract()
