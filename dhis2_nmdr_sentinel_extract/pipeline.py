@@ -1,12 +1,17 @@
-import json
-import tempfile
 from pathlib import Path
+
 import polars as pl
 from d2d_development.extract import DHIS2Extractor
 from openhexa.sdk import current_run, parameter, pipeline, workspace
 from openhexa.toolbox.dhis2 import DHIS2
 from openhexa.toolbox.dhis2.dataframe import get_organisation_unit_groups, get_organisation_units
-from utils import connect_to_dhis2, get_extract_periods, load_configuration, resolve_dates_and_validate, save_to_parquet,  read_parquet_extract
+from utils import (
+    connect_to_dhis2,
+    get_extract_periods,
+    load_configuration,
+    resolve_dates_and_validate,
+    save_to_parquet,
+)
 
 GEO_SCHEMA = {
     "org_unit": pl.String,
@@ -31,7 +36,7 @@ GEO_SCHEMA = {
 @parameter(
     code="end_date",
     name="End date (format: YYYYMM)",
-    default="202604",
+    default="202605",
     type=str,
     required=False,
     help="End date for data extraction in YYYYMM format. If not set, it will default to current date minus 1.",
@@ -40,18 +45,18 @@ GEO_SCHEMA = {
     code="extract",
     name="Run data extract",
     type=bool,
-    default=False,
+    default=True,
     help=(
-        "If set to TRUE the extraction from DHIS2 wiil take place."
+        "If set to TRUE the extraction from DHIS2 will take place."
     ),
 )
 @parameter(
     code="transform_load",
-    name="Run data transformation and laod to the database",
+    name="Run data transformation and load to the database",
     type=bool,
     default=True,
     help=(
-        "If set to TRUE it will rin the transformation step and load form the data previously extracted."
+        "If set to TRUE it will run the transformation step and load from the data previously extracted."
     ),
 )
 def dhis2_nmdr_sentinel_extract(start_date: str, end_date: str, extract: bool, transform_load: bool):
@@ -60,13 +65,13 @@ def dhis2_nmdr_sentinel_extract(start_date: str, end_date: str, extract: bool, t
     Runs extraction and/or transformation and load, depending on parameters.
 
     Args:
-        start_date (str): Start date for data extraction/transformation in YYYYMM format.
-        end_date (str): End date for data extraction/transformation in YYYYMM format.
+        start_date (str): Start date for data extraction in YYYYMM format (extract step only).
+        end_date (str): End date for data extraction in YYYYMM format (extract step only).
         extract (bool): Whether to run the extract step from DHIS2.
-        transform_load (bool): Whether to run the extract and load steps from DHIS2.
+        transform_load (bool): Whether to run the transform and load steps. Note: the transform
+            step processes every extract file found on disk, regardless of start/end dates.
     """
-    pipelines_root = Path(workspace.files_path) / "pipelines"
-    pipeline_path = pipelines_root / "dhis2_nmdr_sentinel_extract"
+    pipeline_path = Path(workspace.files_path) / "pipelines" / "dhis2_nmdr_sentinel_extract"
     pyramid_path = pipeline_path / "data" / "pyramid_metadata"
     org_units_group_path = pipeline_path / "data" / "orgUnits_groups"
     extract_path = pipeline_path / "data" / "nmdr_extracts"
@@ -78,18 +83,14 @@ def dhis2_nmdr_sentinel_extract(start_date: str, end_date: str, extract: bool, t
     start, end = resolve_dates_and_validate(start_date, end_date, config)
     periods = get_extract_periods(start, end)
 
-    sentinelle_ou_groups = {
-    "qTZ3L6pLMTi": "CS Site Sentinelle",
-    "wldxDI2Ey5c": "HGR Site Sentinelle",
-    }
+    sentinelle_ou_groups = config["SENTINELLE_OU_GROUPS"]
 
     # --- EXTRACT ---
     if extract:
-
         dhis2_nmdr_client = connect_to_dhis2(connection_str=config["SETTINGS"]["DHIS2_CONNECTION"])
         try:
             extract_step(
-                pipeline_path=pipeline_path,
+                extract_path=extract_path,
                 dhis2_client=dhis2_nmdr_client,
                 extract_periods=periods,
                 config=config,
@@ -102,9 +103,8 @@ def dhis2_nmdr_sentinel_extract(start_date: str, end_date: str, extract: bool, t
             current_run.log_error(f"An error occurred during extraction: {e}")
             raise
 
-    # --- TRASFORM ---
+    # --- TRANSFORM ---
     if transform_load:
-
         try:
             transform_step(
                 pipeline_path=pipeline_path,
@@ -119,13 +119,13 @@ def dhis2_nmdr_sentinel_extract(start_date: str, end_date: str, extract: bool, t
             current_run.log_error(f"An error occurred during transformation: {e}")
             raise
 
- 
+
 # =============================================================================
 # EXTRACT FUNCTIONS
 # =============================================================================
 
 def extract_step(
-    pipeline_path: Path,
+    extract_path: Path,
     dhis2_client: DHIS2,
     extract_periods: list[str],
     config: dict,
@@ -133,10 +133,10 @@ def extract_step(
     org_units_group_path: Path,
     sentinelle_ou_groups: dict[str, str],
 ) -> None:
-    """Extracts pyramid metadata, org Unit groups meadata and DHIS2 analytics data.
+    """Extracts pyramid metadata, org unit groups metadata and DHIS2 analytics data.
 
     Args:
-        pipeline_path (Path): Root path of the pipeline.
+        extract_path (Path): Root path where the extracted files are saved.
         dhis2_client (DHIS2): Connected DHIS2 client.
         extract_periods (list[str]): Periods to extract (YYYYMM format).
         config (dict): Extraction configuration.
@@ -144,26 +144,18 @@ def extract_step(
         org_units_group_path (Path): Root path for the Org Units per group metadata.
         sentinelle_ou_groups (dict[str, str]): Mapping of org unit ID -> group name.
     """
-    try:
-        extract_pyramid_metadata(
-            dhis2_client=dhis2_client,
-            pyramid_path=pyramid_path,
-        )
-        current_run.log_info("Pyramid metada extracted successfully.")
-    except Exception as e:
-        current_run.log_error(f"An error occurred during pyramid extraction: {e}")
-        raise
-    
-    try:
-        extract_sentinelle_org_units(
-            org_units_group_path=org_units_group_path,
-            dhis2_client=dhis2_client,
-            sentinelle_ou_groups=sentinelle_ou_groups,
-        )
-        current_run.log_info("Org unit groups metada extracted successfully.")
-    except Exception as e:
-        current_run.log_error(f"An error occurred during sentinelle org units extraction: {e}")
-        raise
+    extract_pyramid_metadata(
+        dhis2_client=dhis2_client,
+        pyramid_path=pyramid_path,
+    )
+    current_run.log_info("Pyramid metadata extracted successfully.")
+
+    extract_sentinelle_org_units(
+        org_units_group_path=org_units_group_path,
+        dhis2_client=dhis2_client,
+        sentinelle_ou_groups=sentinelle_ou_groups,
+    )
+    current_run.log_info("Org unit groups metadata extracted successfully.")
 
     current_run.log_info(f"Extracting for periods: {extract_periods}")
 
@@ -175,22 +167,18 @@ def extract_step(
     org_units_df = pl.read_parquet(org_units_group_path / "orgUnits_group.parquet")
     org_unit_list = org_units_df["org_unit_id"].to_list()
 
-    try:
-        extract_data_elements_for_periods(
-            extract_periods=extract_periods,
-            config=config,
-            dhis2_nmdr_client=dhis2_client,
-            pipeline_path=pipeline_path,
-            org_unit_list=org_unit_list,
-        )
-        current_run.log_info("DHIS2 indicators data extracted successfully.")
-    except Exception as e:
-        current_run.log_error(f"An error occurred during DHIS2 indicators extraction: {e}")
-        raise
+    extract_data_elements_for_periods(
+        extract_periods=extract_periods,
+        config=config,
+        dhis2_nmdr_client=dhis2_client,
+        extract_path=extract_path,
+        org_unit_list=org_unit_list,
+    )
+    current_run.log_info("DHIS2 indicators data extracted successfully.")
 
 
 def extract_pyramid_metadata(
-    dhis2_client: DHIS2, 
+    dhis2_client: DHIS2,
     pyramid_path: Path,
 ) -> None:
     """Extracts and saves the pyramid metadata at level 5.
@@ -213,8 +201,8 @@ def extract_pyramid_metadata(
 
 
 def extract_sentinelle_org_units(
-    org_units_group_path: Path, 
-    dhis2_client: DHIS2, 
+    org_units_group_path: Path,
+    dhis2_client: DHIS2,
     sentinelle_ou_groups: dict[str, str],
     ) -> None:
     """Extracts and saves sentinelle organisation unit IDs and their group mapping.
@@ -244,9 +232,9 @@ def extract_sentinelle_org_units(
             ou_group_pairs.append({"org_unit_id": ou_id, "orgUnitGroup": group_name})
 
     df = pl.DataFrame(ou_group_pairs)
-    
+
     current_run.log_info(f"Found {len(df)} sentinelle facilities across {len(sentinelle_ou_groups)} groups")
-    
+
     save_to_parquet(data=df, filename=org_units_group_path / "orgUnits_group.parquet")
     current_run.log_info(f"Sentinelle org units saved: {org_units_group_path / 'orgUnits_group.parquet'}")
 
@@ -255,7 +243,7 @@ def extract_data_elements_for_periods(
     extract_periods: list[str],
     config: dict,
     dhis2_nmdr_client: DHIS2,
-    pipeline_path: Path,
+    extract_path: Path,
     org_unit_list: list[str],
 ) -> None:
     """Downloads data elements for each period.
@@ -264,7 +252,7 @@ def extract_data_elements_for_periods(
         extract_periods (list[str]): Periods to extract, in YYYYMM format.
         config (dict): Extraction configuration loaded from extract_config.json.
         dhis2_nmdr_client (DHIS2): Connected DHIS2 client used to retrieve the data.
-        pipeline_path (Path): Root path of the pipeline.
+        extract_path (Path): Root path where the extracted files are saved.
         org_unit_list (list[str]): Organisation unit IDs to extract data for.
     """
     dhis2_extractor = DHIS2Extractor(dhis2_client=dhis2_nmdr_client, download_mode=config["SETTINGS"]["MODE"])
@@ -274,14 +262,14 @@ def extract_data_elements_for_periods(
                 data_elements=config["DATA_ELEMENTS"]["UIDS"],
                 org_units=org_unit_list,
                 period=period,
-                output_dir=pipeline_path / "data" / "nmdr_extracts",
+                output_dir=extract_path,
                 filename=f"nmdr_extract_{period}.parquet",
             )
             if not raw_data_path:
                 current_run.log_info(f"No data elements data for period {period}.")
     except Exception as e:
-        raise Exception(f"Extract data elements error : {e}") from e 
-    
+        raise Exception(f"Extract data elements error : {e}") from e  # let it crash!
+
 # =============================================================================
 # TRANSFORM FUNCTIONS
 # =============================================================================
@@ -296,7 +284,10 @@ def transform_step(
     mapping: dict,
 ) -> None:
     """Transforms the extracted data, computes num and den values for each indicator.
-    
+
+    Processes every file matching nmdr_extract_YYYYMM.parquet found in extract_path,
+    regardless of the pipeline's start/end date parameters.
+
     Args:
         pipeline_path (Path): Root path of the pipeline.
         pyramid_path (Path): Root path for the pyramid metadata.
@@ -305,28 +296,30 @@ def transform_step(
         transform_path (Path): Root path where to save the transformed files.
         mapping (dict): Mappings between indicators to be calculated and num and den components.
     """
-    try:
-        fosa_names = load_fosa_names(pyramid_path / "nmdr_pyramid_metadata.parquet")
+    fosa_names = load_fosa_names(pyramid_path / "nmdr_pyramid_metadata.parquet")
 
-        periods = sorted(
-        file.stem[-6:]
-        for file in extract_path.glob("nmdr_extract_*.parquet")
+    org_units_groups = (
+        pl.read_parquet(org_units_group_path / "orgUnits_group.parquet")
+        .rename({"org_unit_id": "org_unit", "orgUnitGroup": "organisationUnitGroup"})
+    )
+
+    extract_files = sorted(extract_path.glob("nmdr_extract_*.parquet"))
+
+    if not extract_files:
+        current_run.log_info(f"No extract files found in {extract_path}. Nothing to transform.")
+        return
+
+    for extract_file in extract_files:
+        transform_period(
+            extract_file=extract_file,
+            period=extract_file.stem[-6:],
+            indicator_mapping=mapping,
+            fosa_names=fosa_names,
+            org_units_groups=org_units_groups,
+            transform_path=transform_path,
         )
 
-        for period in periods:
-            transform_period(
-                period=period,
-                extracts_path=extract_path,
-                indicator_mapping=mapping,
-                fosa_names=fosa_names,
-                org_units_group_path=org_units_group_path,
-                transform_path=transform_path,
-            )
-
-        current_run.log_info("DHIS2 indicators data transformed successfully.")
-    except Exception as e:
-        current_run.log_error(f"An error occurred during DHIS2 indicators transformation: {e}")
-        raise
+    current_run.log_info("DHIS2 indicators data transformed successfully.")
 
 
 def load_fosa_names(pyramid_file: Path) -> pl.DataFrame:
@@ -366,34 +359,24 @@ def load_fosa_names(pyramid_file: Path) -> pl.DataFrame:
 
 
 def transform_period(
+    extract_file: Path,
     period: str,
-    extracts_path: Path,
     indicator_mapping: list[dict],
     fosa_names: pl.DataFrame,
-    org_units_group_path: Path,
+    org_units_groups: pl.DataFrame,
     transform_path: Path,
 ) -> None:
     """Transforms a single period's NMDR extract into indicator numerator/denominator rows.
 
     Args:
-        period (str): Period to transform, in YYYYMM format.
-        extracts_path (Path): Path to the folder containing nmdr_extract_<period>.parquet files.
+        extract_file (Path): Path to the nmdr_extract_<period>.parquet file to transform.
+        period (str): Period being transformed, in YYYYMM format.
         indicator_mapping (list[dict]): Indicator definitions (name, num_dx, den_dx).
         fosa_names (pl.DataFrame): org_unit id -> fosa name lookup table.
-        org_units_group_path (Path): Folder containing orgUnits_group.parquet, mapping org_unit_id -> orgUnitGroup.
+        org_units_groups (pl.DataFrame): org_unit -> organisationUnitGroup lookup table.
         transform_path (Path): Folder where nmdr_transform_<period>.parquet is written.
     """
-    extract_file = extracts_path / f"nmdr_extract_{period}.parquet"
-    if not extract_file.exists():
-        current_run.log_info(f"No extract found for period {period} at {extract_file}. Skipping.")
-        return
-
     df = pl.read_parquet(extract_file).with_columns(pl.col("value").cast(pl.Float64, strict=False))
-
-    org_units_groups = (
-        pl.read_parquet(org_units_group_path / "orgUnits_group.parquet")
-        .rename({"org_unit_id": "org_unit", "orgUnitGroup": "organisationUnitGroup"})
-    )
 
     all_org_units = df.select("org_unit").unique().join(org_units_groups, on="org_unit", how="left")
     indicator_names = pl.DataFrame({"indicateur_name": [ind["indicateur_name"] for ind in indicator_mapping]})
