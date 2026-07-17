@@ -27,7 +27,7 @@ GEO_SCHEMA = {
 @parameter(
     code="start_date",
     name="Start date (format: YYYYMM)",
-    default="202604",
+    default=None,
     type=str,
     required=False,
     help=(
@@ -38,7 +38,7 @@ GEO_SCHEMA = {
 @parameter(
     code="end_date",
     name="End date (format: YYYYMM)",
-    default="202605",
+    default=None,
     type=str,
     required=False,
     help="End date for data extraction in YYYYMM format. If not set, it will default to current date minus 1.",
