@@ -454,7 +454,7 @@ def load_step(
     Args:
         transform_path (Path): Root path containing the transformed parquet files to load.
     """
-    table_name = "nmdr_sentinelles_test"
+    table_name = "nmdr_sentinelles"
 
     transform_files = sorted(transform_path.glob("nmdr_transform_*.parquet"))
 
