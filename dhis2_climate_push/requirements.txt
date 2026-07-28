@@ -1,3 +1,4 @@
+d2d_development @ git+https://github.com/BLSQ/openhexa-ds-developments.git#subdirectory=d2d_development
 openhexa.toolbox==1.6.1
 sqlalchemy==2.0.39
 psycopg2-binary>=2.9.9

@@ -2,118 +2,76 @@ import ast
 import json
 import logging
 import os
+from collections.abc import Generator
 from datetime import datetime
 from pathlib import Path
-from typing import Generator
 
 import geopandas as gpd
 import pandas as pd
 import requests
 from openhexa.sdk import current_run, pipeline, workspace
 from openhexa.toolbox.dhis2 import DHIS2
+from org_units_aligner.org_units_aligner import DHIS2PyramidAligner
 from shapely.geometry import mapping
 from sqlalchemy import create_engine
+from utils import configure_logging, connect_to_dhis2, read_json_file, save_logs
 
 
 @pipeline("dhis2_climate_push")
 def dhis2_climate_push():
-    """
-    This pipeline pushes climate data to DHIS2.
-
-    """
+    """Pipeline to push climate data to DHIS2."""
     current_run.log_info("Starting climate pipeline...")
-    root_path = Path(workspace.files_path) / "pipelines" / "dhis2_climate_push"
+    pipeline_path = Path(workspace.files_path) / "pipelines" / "dhis2_climate_push"
 
+    config = read_json_file(pipeline_path / "config" / "pnlp_climate_push_config.json")
+    dhis2_client = connect_to_dhis2(config=config["CLIMATE_PUSH_SETTINGS"]["DHIS2_CONNECTION_TARGET"])
+
+    # TODO:
+    # THIS PIPELINE SHOULD BE A SLAVE OF THE ERA5 PIPELINES EXECUTED FROM THERE
+    # THE ERA5 PIPELINES WILL DOWNLOAD AND UPDATE THE SHAPES TABLE
+    # THIS PIPELINE WILL MAKE THE ALIGNMENT USING THAT UPDATED TABLE
     try:
-        # Load the pipeline configuration
-        pipeline_config = load_climate_config(pipeline_path=root_path)
-
-        # connect to DHIS2
-        dhis2_client = connect_to_dhis2_target(config=pipeline_config, cache_dir=None)
-
-        # TODO:
-        # THIS PIPELINE SHOULD BE A SLAVE OF THE ERA5 PIPELINES EXECUTED FROM THERE
-        # THE ERA5 PIPELINES WILL DOWNLOAD AND UPDATE THE SHAPES TABLE
-        # THIS PIPELINE WILL MAKE THE ALIGNMENT USING THAT UPDATED TABLE
-
         # NOTE: we could implement a check at the begining to execute only when there is new data..
         push_organisation_units(
-            root=root_path,
+            pipeline_path=pipeline_path,
             dhis2_client_target=dhis2_client,
-            config=pipeline_config,
+            config=config,
             run_task=True,
         )
 
         # Run precipitation task
-        precipitation_push(
-            pipeline_path=root_path,
-            dhis2_client_target=dhis2_client,
-            config=pipeline_config,
-        )
+        precipitation_push(pipeline_path=pipeline_path, dhis2_client_target=dhis2_client, config=config)
 
         # Run temperature min task
-        tempareture_min_push(pipeline_path=root_path, dhis2_client_target=dhis2_client, config=pipeline_config)
+        tempareture_min_push(pipeline_path=pipeline_path, dhis2_client_target=dhis2_client, config=config)
 
         # Run temperature task
-        tempareture_max_push(pipeline_path=root_path, dhis2_client_target=dhis2_client, config=pipeline_config)
+        tempareture_max_push(pipeline_path=pipeline_path, dhis2_client_target=dhis2_client, config=config)
 
         # Run humidity task
-        relative_humidity_push(pipeline_path=root_path, dhis2_client_target=dhis2_client, config=pipeline_config)
+        relative_humidity_push(pipeline_path=pipeline_path, dhis2_client_target=dhis2_client, config=config)
 
     except Exception as e:
         current_run.log_error(f"An error occurred: {e}")
         raise
 
 
-def load_climate_config(pipeline_path: Path) -> dict:
-    """Load the pipeline configuration."""
-
-    config_path = pipeline_path / "config" / "pnlp_climate_push_config.json"
-    current_run.log_info(f"Loading pipeline configuration from {config_path}")
-
-    try:
-        with open(config_path, "r") as f:
-            config = json.load(f)
-        return config
-    except FileNotFoundError as e:
-        raise FileNotFoundError(f"Configuration file not found {e}.") from e
-    except json.JSONDecodeError as e:
-        raise json.JSONDecodeError(f"Configuration file is not a valid JSON file {e}.") from e
-    except Exception as e:
-        raise Exception(f"An error occurred while loading the configuration: {e}") from e
-
-
-def connect_to_dhis2_target(config: dict, cache_dir: str):
-    try:
-        conn_id = config["CLIMATE_PUSH_SETTINGS"].get("DHIS2_CONNECTION_TARGET", None)
-        if conn_id is None:
-            current_run.log_error("DHIS2 connection is not provided.")
-            raise ValueError
-
-        connection = workspace.dhis2_connection(conn_id)
-        dhis2_client = DHIS2(connection=connection, cache_dir=cache_dir)
-        current_run.log_info(f"Connected to DHIS2 connection: {conn_id}")
-
-        return dhis2_client
-
-    except Exception as e:
-        raise Exception(f"Error while connecting to DHIS2: {e}")
-
-
-def push_organisation_units(root: Path, dhis2_client_target: DHIS2, config: dict, run_task: bool):
-    """
-    This task handles creation and updates of organisation units in the target DHIS2 (incremental approach only).
+def push_organisation_units(pipeline_path: Path, dhis2_client_target: DHIS2, config: dict, run_task: bool) -> bool:
+    """Task to handle creation and updates of organisation units in the target DHIS2 (incremental approach only).
 
     We use the previously extracted pyramid (full) stored as dataframe as input.
     The format of the pyramid contains the expected columns. A dataframe that doesn't contain the
     mandatory columns will be skipped (not valid).
+
+    Returns:
+        bool: True if the task was executed successfully, False otherwise.
     """
     if not run_task:
         return True
 
     current_run.log_info("Starting organisation units push.")
-    report_path = root / "logs" / "org_units"
-    configure_logging(logs_path=report_path, task_name="climate_data_org_units")
+    logger, logs_file = configure_logging(logs_path=Path("/home/jovyan/tmp/logs"), task_name="push_orgunits")
+    # logger, logs_file = configure_logging(logs_path=pipeline_path / "logs", task_name="push_orgunits")  # local
 
     # WE ALIGN ONLY THE ZONES DE SANTE USED FOR CLIMATE METRICS.
     # Load pyramid from boundaries DB table (cod_iaso_zone_de_sante)
@@ -127,72 +85,127 @@ def push_organisation_units(root: Path, dhis2_client_target: DHIS2, config: dict
     cod_zs_boundaries_table["geometry_json"] = cod_zs_boundaries_table["geometry"].apply(
         lambda x: json.dumps(mapping(x))
     )
-    orgUnit_source = pd.DataFrame(cod_zs_boundaries_table.drop(columns=["geometry", "parent"]))
-    orgUnit_source = orgUnit_source.rename(columns={"ref": "id", "ou_parent": "parent", "geometry_json": "geometry"})
-    orgUnit_source = orgUnit_source[
+    orgunit_source = pd.DataFrame(cod_zs_boundaries_table.drop(columns=["geometry", "parent"]))
+    orgunit_source = orgunit_source.rename(columns={"ref": "id", "ou_parent": "parent", "geometry_json": "geometry"})
+    orgunit_source = orgunit_source[
         ["id", "name", "shortName", "openingDate", "closedDate", "parent", "geometry"]
     ]  # format
 
     # convert that column to dictionary if possible
-    orgUnit_source["parent"] = orgUnit_source["parent"].apply(safe_eval)
+    orgunit_source["parent"] = orgunit_source["parent"].apply(safe_eval)
 
-    if orgUnit_source.shape[0] > 0:
-        # Retrieve the target (NMDR/PNLP) orgUnits to compare
-        current_run.log_info(f"Retrieving organisation units from target DHIS2 instance {dhis2_client_target.api.url}")
-        orgUnit_target = dhis2_client_target.meta.organisation_units(
-            fields="id,name,shortName,openingDate,closedDate,parent,level,path,geometry"
+    current_run.log_info("Starting organisation units push.")
+
+    try:
+        DHIS2PyramidAligner(logger=logger, logging_interval=100).align_to(
+            target_dhis2=dhis2_client_target,
+            source_pyramid=orgunit_source,
         )
-        orgUnit_target = pd.DataFrame(orgUnit_target)
+    finally:
+        save_logs(logs_file, output_dir=pipeline_path / "logs" / "push_orgunits")
 
-        # Get list of ids for creation and update (Zones de sante (source) - Entire pyramid (target) = new updates)
-        ou_new = list(set(orgUnit_source.id) - set(orgUnit_target.id))
-        ou_matching = list(set(orgUnit_source.id).intersection(set(orgUnit_target.id)))  # Check differences
-        dhsi2_version = dhis2_client_target.meta.system_info().get("version")
 
-        # Create orgUnits
-        try:
-            if len(ou_new) > 0:
-                current_run.log_info(f"Creating {len(ou_new)} organisation units.")
-                ou_to_create = orgUnit_source[orgUnit_source.id.isin(ou_new)]
-                # NOTE: Geometry is valid for versions > 2.32
-                if dhsi2_version <= "2.32":
-                    ou_to_create["geometry"] = None
-                    current_run.log_warning("DHIS2 version not compatible with geometry. Geometry will be ignored.")
-                push_orgunits_create(
-                    ou_df=ou_to_create,
-                    dhis2_client_target=dhis2_client_target,
-                    report_path=report_path,
-                )
-        except Exception as e:
-            raise Exception(f"Unexpected error occurred while creating organisation units. Error: {e}")
+# def push_organisation_units_OLD(root: Path, dhis2_client_target: DHIS2, config: dict, run_task: bool) -> bool:
+#     """Task to handle creation and updates of organisation units in the target DHIS2 (incremental approach only).
 
-        # Update orgUnits
-        try:
-            if len(ou_matching) > 0:
-                current_run.log_info(f"Checking for updates in {len(ou_matching)} organisation units")
-                # NOTE: Geometry is valid for versions > 2.32
-                if dhsi2_version <= "2.32":
-                    current_run.log_warning("DHIS2 version not compatible with geometry. Geometry will be ignored.")
-                    orgUnit_source["geometry"] = None
-                    orgUnit_target["geometry"] = None
+#     We use the previously extracted pyramid (full) stored as dataframe as input.
+#     The format of the pyramid contains the expected columns. A dataframe that doesn't contain the
+#     mandatory columns will be skipped (not valid).
 
-                push_orgunits_update(
-                    orgUnit_source=orgUnit_source,
-                    orgUnit_target=orgUnit_target,
-                    matching_ou_ids=ou_matching,
-                    dhis2_client_target=dhis2_client_target,
-                    report_path=report_path,
-                )
-                current_run.log_info("Organisation units push finished.")
-        except Exception as e:
-            raise Exception(f"Unexpected error occurred while updating organisation units. Error: {e}")
+#     Returns:
+#         bool: True if the task was executed successfully, False otherwise.
+#     """
+#     if not run_task:
+#         return True
 
-    else:
-        current_run.log_warning("No data found in the pyramid file. Organisation units task skipped.")
+#     current_run.log_info("Starting organisation units push.")
+#     report_path = root / "logs" / "org_units"
+#     configure_logging(logs_path=report_path, task_name="climate_data_org_units")
+
+#     # WE ALIGN ONLY THE ZONES DE SANTE USED FOR CLIMATE METRICS.
+#     # Load pyramid from boundaries DB table (cod_iaso_zone_de_sante)
+#     # (this table is updated by era5_precipitation pipeline Zones de sante level only)
+#     dbengine = create_engine(os.environ["WORKSPACE_DATABASE_URL"])
+#     cod_zs_boundaries_table = gpd.read_postgis(
+#         config["CLIMATE_PUSH_SETTINGS"]["BOUNDARIES_TABLE"], con=dbengine, geom_col="geometry"
+#     )
+
+#     # Use 'mapping' to convert geometry to GeoJSON-like dictionary
+#     cod_zs_boundaries_table["geometry_json"] = cod_zs_boundaries_table["geometry"].apply(
+#         lambda x: json.dumps(mapping(x))
+#     )
+#     orgunit_source = pd.DataFrame(cod_zs_boundaries_table.drop(columns=["geometry", "parent"]))
+#     orgunit_source = orgunit_source.rename(columns={"ref": "id", "ou_parent": "parent", "geometry_json": "geometry"})
+#     orgunit_source = orgunit_source[
+#         ["id", "name", "shortName", "openingDate", "closedDate", "parent", "geometry"]
+#     ]  # format
+
+#     # convert that column to dictionary if possible
+#     orgunit_source["parent"] = orgunit_source["parent"].apply(safe_eval)
+
+#     if orgunit_source.shape[0] > 0:
+#         # Retrieve the target (NMDR/PNLP) orgUnits to compare
+#         current_run.log_info(f"Retrieving organisation units from target DHIS2 instance {dhis2_client_target.api.url}")
+#         orgunit_target = dhis2_client_target.meta.organisation_units(
+#             fields="id,name,shortName,openingDate,closedDate,parent,level,path,geometry"
+#         )
+#         orgunit_target = pd.DataFrame(orgunit_target)
+
+#         # Get list of ids for creation and update (Zones de sante (source) - Entire pyramid (target) = new updates)
+#         ou_new = list(set(orgunit_source.id) - set(orgunit_target.id))
+#         ou_matching = list(set(orgunit_source.id).intersection(set(orgunit_target.id)))  # Check differences
+#         dhsi2_version = dhis2_client_target.meta.system_info().get("version")
+
+#         # Create orgUnits
+#         try:
+#             if len(ou_new) > 0:
+#                 current_run.log_info(f"Creating {len(ou_new)} organisation units.")
+#                 ou_to_create = orgunit_source[orgunit_source.id.isin(ou_new)]
+#                 # NOTE: Geometry is valid for versions > 2.32
+#                 if dhsi2_version <= "2.32":
+#                     ou_to_create["geometry"] = None
+#                     current_run.log_warning("DHIS2 version not compatible with geometry. Geometry will be ignored.")
+#                 push_orgunits_create(
+#                     ou_df=ou_to_create,
+#                     dhis2_client_target=dhis2_client_target,
+#                     report_path=report_path,
+#                 )
+#         except Exception as e:
+#             raise Exception(f"Unexpected error occurred while creating organisation units. Error: {e}")
+
+#         # Update orgUnits
+#         try:
+#             if len(ou_matching) > 0:
+#                 current_run.log_info(f"Checking for updates in {len(ou_matching)} organisation units")
+#                 # NOTE: Geometry is valid for versions > 2.32
+#                 if dhsi2_version <= "2.32":
+#                     current_run.log_warning("DHIS2 version not compatible with geometry. Geometry will be ignored.")
+#                     orgUnit_source["geometry"] = None
+#                     orgUnit_target["geometry"] = None
+
+#                 push_orgunits_update(
+#                     orgUnit_source=orgUnit_source,
+#                     orgUnit_target=orgUnit_target,
+#                     matching_ou_ids=ou_matching,
+#                     dhis2_client_target=dhis2_client_target,
+#                     report_path=report_path,
+#                 )
+#                 current_run.log_info("Organisation units push finished.")
+#         except Exception as e:
+#             raise Exception(f"Unexpected error occurred while updating organisation units. Error: {e}")
+
+#     else:
+#         current_run.log_warning("No data found in the pyramid file. Organisation units task skipped.")
+#     return True
 
 
 # convert str to dict
-def safe_eval(val):
+def safe_eval(val: dict) -> dict | None:
+    """Evaluate a string as a Python literal safely.
+
+    Returns:
+        dict | None: The evaluated dictionary if successful, None otherwise.
+    """
     try:
         return ast.literal_eval(val)
     except (ValueError, SyntaxError):
@@ -200,8 +213,11 @@ def safe_eval(val):
 
 
 def precipitation_push(pipeline_path: Path, dhis2_client_target: DHIS2, config: dict) -> bool:
-    """Put some data processing code here."""
+    """Put some data processing code here.
 
+    Returns:
+        bool: True if the task was executed successfully, False otherwise.
+    """
     current_run.log_info("Precipitation data push started...")
     report_path = pipeline_path / "logs" / "precipitation"
     configure_logging(logs_path=report_path, task_name="push_data")
@@ -502,154 +518,153 @@ class OrgUnitObj:
         return f"OrgUnitObj({self.id}, {self.name})"
 
 
-def push_orgunits_create(ou_df: pd.DataFrame, dhis2_client_target: DHIS2, report_path: Path):
-    errors_count = 0
-    for _, row in ou_df.iterrows():
-        ou = OrgUnitObj(row)
-        if ou.is_valid():
-            response = push_orgunit(
-                dhis2_client=dhis2_client_target,
-                orgunit=ou,
-                strategy="CREATE",
-                dry_run=False,  # dry_run=False -> Apply changes in the DHIS2
-            )
-            if response["status"] == "ERROR":
-                errors_count = errors_count + 1
-                logging.info(str(response))
-            else:
-                current_run.log_info(f"New organisation unit created: {ou}")
-        else:
-            logging.info(
-                str(
-                    {
-                        "action": "CREATE",
-                        "statusCode": None,
-                        "status": "NOTVALID",
-                        "response": None,
-                        "ou_id": row.get("id"),
-                    }
-                )
-            )
+# def push_orgunits_create(ou_df: pd.DataFrame, dhis2_client_target: DHIS2, report_path: Path):
+#     errors_count = 0
+#     for _, row in ou_df.iterrows():
+#         ou = OrgUnitObj(row)
+#         if ou.is_valid():
+#             response = push_orgunit(
+#                 dhis2_client=dhis2_client_target,
+#                 orgunit=ou,
+#                 strategy="CREATE",
+#                 dry_run=False,  # dry_run=False -> Apply changes in the DHIS2
+#             )
+#             if response["status"] == "ERROR":
+#                 errors_count = errors_count + 1
+#                 logging.info(str(response))
+#             else:
+#                 current_run.log_info(f"New organisation unit created: {ou}")
+#         else:
+#             logging.info(
+#                 str(
+#                     {
+#                         "action": "CREATE",
+#                         "statusCode": None,
+#                         "status": "NOTVALID",
+#                         "response": None,
+#                         "ou_id": row.get("id"),
+#                     }
+#                 )
+#             )
 
-    if errors_count > 0:
-        current_run.log_info(
-            f"{errors_count} errors occurred during creation. Please check the latest execution report under {report_path}."
-        )
-    else:
-        current_run.log_info("No new organisation units found.")
-
-
-def push_orgunits_update(
-    orgUnit_source: pd.DataFrame,
-    orgUnit_target: pd.DataFrame,
-    matching_ou_ids: list,
-    dhis2_client_target: DHIS2,
-    report_path: str,
-):
-    """
-    Update org units based matching id list
-    """
-
-    # Use these columns to compare (check for Updates)
-    comparison_cols = [
-        "name",
-        "shortName",
-        "openingDate",
-        "closedDate",
-        "parent",
-        "geometry",
-    ]
-
-    # build id dictionary (faster) and compare on selected columns
-    index_dictionary = build_id_indexes(orgUnit_source, orgUnit_target, matching_ou_ids)
-    # orgUnit_source_f = orgUnit_source[comparison_cols]
-    # orgUnit_target_f = orgUnit_target[comparison_cols]
-    orgUnit_source_f = orgUnit_source.loc[:, comparison_cols].copy()
-    orgUnit_target_f = orgUnit_target.loc[:, comparison_cols].copy()
-
-    errors_count = 0
-    updates_count = 0
-    progress_count = 0
-    for id, indices in index_dictionary.items():
-        progress_count = progress_count + 1
-        source = orgUnit_source_f.iloc[indices["source"]].copy()
-        target = orgUnit_target_f.iloc[indices["target"]].copy()
-        # get cols with differences
-        diff_fields = source[~((source == target) | (source.isna() & target.isna()))]
-
-        # If there are differences then update!
-        if not diff_fields.empty:
-            # add the ID for update
-            source["id"] = id
-            ou_update = OrgUnitObj(source)
-            response = push_orgunit(
-                dhis2_client=dhis2_client_target,
-                orgunit=ou_update,
-                strategy="UPDATE",
-                dry_run=False,  # dry_run=False -> Apply changes in the DHIS2
-            )
-            if response["status"] == "ERROR":
-                errors_count = errors_count + 1
-            else:
-                updates_count = updates_count + 1
-            logging.info(str(response))
-
-        if progress_count % 5000 == 0:
-            current_run.log_info(f"Organisation units checked: {progress_count}/{len(matching_ou_ids)}")
-
-    current_run.log_info(f"Organisation units updated: {updates_count}")
-    if errors_count > 0:
-        current_run.log_info(
-            f"{errors_count} errors occurred during OU update. Please check the latest execution report under {report_path}."
-        )
+#     if errors_count > 0:
+#         current_run.log_info(
+#             f"{errors_count} errors occurred during creation. Please check the latest execution report under {report_path}."
+#         )
+#     else:
+#         current_run.log_info("No new organisation units found.")
 
 
-def push_orgunit(dhis2_client: DHIS2, orgunit: OrgUnitObj, strategy: str = "CREATE", dry_run: bool = True):
-    if strategy == "CREATE":
-        endpoint = "organisationUnits"
-        payload = orgunit.to_json()
+# def push_orgunits_update(
+#     orgUnit_source: pd.DataFrame,
+#     orgUnit_target: pd.DataFrame,
+#     matching_ou_ids: list,
+#     dhis2_client_target: DHIS2,
+#     report_path: str,
+# ):
+#     """
+#     Update org units based matching id list
+#     """
 
-    if strategy == "UPDATE":
-        endpoint = "metadata"
-        payload = {"organisationUnits": [orgunit.to_json()]}
+#     # Use these columns to compare (check for Updates)
+#     comparison_cols = [
+#         "name",
+#         "shortName",
+#         "openingDate",
+#         "closedDate",
+#         "parent",
+#         "geometry",
+#     ]
 
-    r = dhis2_client.api.session.post(
-        f"{dhis2_client.api.url}/{endpoint}",
-        json=payload,
-        params={"dryRun": dry_run, "importStrategy": f"{strategy}"},
-    )
+#     # build id dictionary (faster) and compare on selected columns
+#     index_dictionary = build_id_indexes(orgUnit_source, orgUnit_target, matching_ou_ids)
+#     # orgUnit_source_f = orgUnit_source[comparison_cols]
+#     # orgUnit_target_f = orgUnit_target[comparison_cols]
+#     orgUnit_source_f = orgUnit_source.loc[:, comparison_cols].copy()
+#     orgUnit_target_f = orgUnit_target.loc[:, comparison_cols].copy()
 
-    return build_formatted_response(response=r, strategy=strategy, ou_id=orgunit.id)
+#     errors_count = 0
+#     updates_count = 0
+#     progress_count = 0
+#     for id, indices in index_dictionary.items():
+#         progress_count = progress_count + 1
+#         source = orgUnit_source_f.iloc[indices["source"]].copy()
+#         target = orgUnit_target_f.iloc[indices["target"]].copy()
+#         # get cols with differences
+#         diff_fields = source[~((source == target) | (source.isna() & target.isna()))]
+
+#         # If there are differences then update!
+#         if not diff_fields.empty:
+#             # add the ID for update
+#             source["id"] = id
+#             ou_update = OrgUnitObj(source)
+#             response = push_orgunit(
+#                 dhis2_client=dhis2_client_target,
+#                 orgunit=ou_update,
+#                 strategy="UPDATE",
+#                 dry_run=False,  # dry_run=False -> Apply changes in the DHIS2
+#             )
+#             if response["status"] == "ERROR":
+#                 errors_count = errors_count + 1
+#             else:
+#                 updates_count = updates_count + 1
+#             logging.info(str(response))
+
+#         if progress_count % 5000 == 0:
+#             current_run.log_info(f"Organisation units checked: {progress_count}/{len(matching_ou_ids)}")
+
+#     current_run.log_info(f"Organisation units updated: {updates_count}")
+#     if errors_count > 0:
+#         current_run.log_info(
+#             f"{errors_count} errors occurred during OU update. Please check the latest execution report under {report_path}."
+#         )
 
 
-def build_formatted_response(response: requests.Response, strategy: str, ou_id: str) -> dict:
-    resp = {
-        "action": strategy,
-        "statusCode": response.status_code,
-        "status": response.json().get("status"),
-        "response": response.json().get("response"),
-        "ou_id": ou_id,
-    }
-    return resp
+# def push_orgunit(dhis2_client: DHIS2, orgunit: OrgUnitObj, strategy: str = "CREATE", dry_run: bool = True):
+#     if strategy == "CREATE":
+#         endpoint = "organisationUnits"
+#         payload = orgunit.to_json()
+
+#     if strategy == "UPDATE":
+#         endpoint = "metadata"
+#         payload = {"organisationUnits": [orgunit.to_json()]}
+
+#     r = dhis2_client.api.session.post(
+#         f"{dhis2_client.api.url}/{endpoint}",
+#         json=payload,
+#         params={"dryRun": dry_run, "importStrategy": f"{strategy}"},
+#     )
+
+#     return build_formatted_response(response=r, strategy=strategy, ou_id=orgunit.id)
 
 
-def build_id_indexes(ou_source, ou_target, ou_matching_ids):
-    # Set "id" as the index for faster lookup
-    df1_lookup = {val: idx for idx, val in enumerate(ou_source["id"])}
-    df2_lookup = {val: idx for idx, val in enumerate(ou_target["id"])}
+# def build_formatted_response(response: requests.Response, strategy: str, ou_id: str) -> dict:
+#     resp = {
+#         "action": strategy,
+#         "statusCode": response.status_code,
+#         "status": response.json().get("status"),
+#         "response": response.json().get("response"),
+#         "ou_id": ou_id,
+#     }
+#     return resp
 
-    # Build the dictionary using prebuilt lookups
-    index_dict = {
-        match_id: {"source": df1_lookup[match_id], "target": df2_lookup[match_id]}
-        for match_id in ou_matching_ids
-        if match_id in df1_lookup and match_id in df2_lookup
-    }
-    return index_dict
+
+# def build_id_indexes(ou_source, ou_target, ou_matching_ids):
+#     # Set "id" as the index for faster lookup
+#     df1_lookup = {val: idx for idx, val in enumerate(ou_source["id"])}
+#     df2_lookup = {val: idx for idx, val in enumerate(ou_target["id"])}
+
+#     # Build the dictionary using prebuilt lookups
+#     index_dict = {
+#         match_id: {"source": df1_lookup[match_id], "target": df2_lookup[match_id]}
+#         for match_id in ou_matching_ids
+#         if match_id in df1_lookup and match_id in df2_lookup
+#     }
+#     return index_dict
 
 
 def tempareture_max_push(pipeline_path: Path, dhis2_client_target: DHIS2, config: dict) -> bool:
     """Put some data processing code here."""
-
     current_run.log_info("Temperature max data push started...")
     report_path = pipeline_path / "logs" / "temperature_max"
     configure_logging(logs_path=report_path, task_name="push_temp_max")
@@ -1341,14 +1356,20 @@ def push_data_elements(
 
 
 def split_list(src_list: list, length: int) -> Generator[list, None, None]:
-    """Split list into chunks."""
+    """Split list into chunks.
+
+    Yields:
+        Generator of lists, each with a maximum length of 'length'.
+    """
     for i in range(0, len(src_list), length):
         yield src_list[i : i + length]
 
 
-def get_response_value_errors(response, chunk):
-    """
-    Collect relevant data for error logs
+def get_response_value_errors(response: dict, chunk: list | None) -> None | dict:
+    """Collect relevant data for error logs.
+
+    Returns:
+        dict: A dictionary containing relevant information from the response and the corresponding chunk of data.
     """
     if response is None:
         return None
@@ -1376,8 +1397,7 @@ def get_response_value_errors(response, chunk):
 
 
 def log_summary_errors(summary: dict):
-    """
-    Logs all the errors in the summary dictionary using the configured logging.
+    """Logs all the errors in the summary dictionary using the configured logging.
 
     Args:
         summary (dict): The dictionary containing import counts and errors.
@@ -1533,28 +1553,6 @@ def log_ignored(report_path, datapoint_list, data_type="precipitation", is_na=Fa
         logging.warning(f"{len(datapoint_list)} {data_type} datapoints to be ignored: ")
         for i, error in enumerate(datapoint_list, start=1):
             logging.warning(f"{i} DataElement {'NA' if is_na else ''} ignored: {error}")
-
-
-def configure_logging(logs_path: Path, task_name: str):
-    """Configure logging for the pipeline.
-
-    Parameters
-    ----------
-    logs_path : Path
-        Directory path where log files will be stored.
-    task_name : str
-        Name of the task to include in the log filename.
-
-    This function creates the log directory if it does not exist and sets up logging to a file.
-    """
-    # Configure logging
-    logs_path.mkdir(parents=True, exist_ok=True)
-    now = datetime.now().strftime("%Y-%m-%d-%H_%M")
-    logging.basicConfig(
-        filename=logs_path / f"{task_name}_{now}.log",
-        level=logging.INFO,
-        format="%(asctime)s - %(message)s",
-    )
 
 
 if __name__ == "__main__":
