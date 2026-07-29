@@ -398,13 +398,23 @@ def transform_period(
         num_frames.append(
             df.filter(pl.col("dx").is_in(indicator["num_dx"]))
             .group_by("org_unit")
-            .agg(pl.col("value").sum().alias("indicateur_num"))
+            .agg(
+                pl.when(pl.col("value").null_count() == pl.col("value").len())
+                .then(None)
+                .otherwise(pl.col("value").sum())
+                .alias("indicateur_num")
+            )
             .with_columns(pl.lit(indicator["indicateur_name"]).alias("indicateur_name"))
         )
         den_frames.append(
             df.filter(pl.col("dx").is_in(indicator["den_dx"]))
             .group_by("org_unit")
-            .agg(pl.col("value").sum().alias("indicateur_den"))
+            .agg(
+                pl.when(pl.col("value").null_count() == pl.col("value").len())
+                .then(None)
+                .otherwise(pl.col("value").sum())
+                .alias("indicateur_den")
+            )
             .with_columns(pl.lit(indicator["indicateur_name"]).alias("indicateur_name"))
         )
 
@@ -446,7 +456,7 @@ def transform_period(
 def load_step(
     transform_path: Path,
 ) -> None:
-    """Loads the transformed NMDR data into the public.nmdr_sentinelles_test table.
+    """Loads the transformed NMDR data into the public.nmdr_sentinelles table.
 
     Truncates the target table and appends every nmdr_transform_YYYYMM.parquet file
     found in transform_path. If no transform files exist, the table is left untouched.
