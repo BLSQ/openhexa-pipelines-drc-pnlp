@@ -119,6 +119,7 @@ def precipitation_push(pipeline_path: Path, dhis2_client_target: DHIS2, config: 
         import_strategy=import_strategy,
         dry_run=dry_run,
         max_post=max_post,
+        logging_interval=max_post,
         logger=logger,
     )
 
@@ -221,6 +222,7 @@ def tempareture_min_push(pipeline_path: Path, dhis2_client_target: DHIS2, config
         import_strategy=import_strategy,
         dry_run=dry_run,
         max_post=max_post,
+        logging_interval=max_post,
         logger=logger,
     )
     try:
@@ -323,6 +325,7 @@ def tempareture_max_push(pipeline_path: Path, dhis2_client_target: DHIS2, config
         import_strategy=import_strategy,
         dry_run=dry_run,
         max_post=max_post,
+        logging_interval=max_post,
         logger=logger,
     )
     try:
@@ -425,6 +428,7 @@ def relative_humidity_push(pipeline_path: Path, dhis2_client_target: DHIS2, conf
         import_strategy=import_strategy,
         dry_run=dry_run,
         max_post=max_post,
+        logging_interval=max_post,
         logger=logger,
     )
     try:
