@@ -19,7 +19,7 @@ from utils import (
 )
 
 
-@pipeline("dhis2_pnlp_push_v2", timeout=36000)
+@pipeline("dhis2_pnlp_push_v2", timeout=43200)
 @parameter(
     "push_orgunits",
     name="Push Organisation Units",
@@ -57,18 +57,18 @@ def dhis2_pnlp_push_v2(push_orgunits: bool, push_pop: bool, push_analytics_task:
     pipeline_path = Path(workspace.files_path) / "pipelines" / "dhis2_pnlp_push_v2"
     pipeline_path.mkdir(parents=True, exist_ok=True)
 
-    try:
-        config = load_configuration(pipeline_path / "config" / "pnlp_push_config.json")
-        dhis2_client = connect_to_dhis2(connection_str=config["SETTINGS"].get("DHIS2_CONNECTION"))
+    config = load_configuration(pipeline_path / "config" / "pnlp_push_config.json")
+    dhis2_client = connect_to_dhis2(connection_str=config["SETTINGS"].get("DHIS2_CONNECTION"))
 
-        # check updated data in dataset
-        to_update = should_push_data(
-            dataset_id=config["SETTINGS"].get("OPENHEXA_DATASET_ID"),
-            timestamp_path=pipeline_path / "config" / "last_update.json",
-        )
+    # check updated data in dataset
+    to_update = should_push_data(
+        dataset_id=config["SETTINGS"].get("OPENHEXA_DATASET_ID"),
+        timestamp_path=pipeline_path / "config" / "last_update.json",
+    )
 
-        if to_update or force_run:
-            current_run.log_info("New data version detected. Starting pipeline execution...")
+    if to_update or force_run:
+        current_run.log_info("New data version detected. Starting pipeline execution...")
+        try:
             push_organisation_units(
                 pipeline_path=pipeline_path,
                 dhis2_client_target=dhis2_client,
@@ -94,11 +94,10 @@ def dhis2_pnlp_push_v2(push_orgunits: bool, push_pop: bool, push_analytics_task:
                 timestamp_filename=pipeline_path / "config" / "last_update.json",
                 dataset_id=config["SETTINGS"].get("OPENHEXA_DATASET_ID"),
             )
-        else:
-            current_run.log_info("No updates found. Pipeline execution skipped.")
-
-    except Exception as e:
-        current_run.log_error(f"An error occurred: {e}")
+        except Exception as e:
+            current_run.log_error(f"An error occurred: {e}")
+    else:
+        current_run.log_info("No updates found. Pipeline execution skipped.")
 
 
 def push_organisation_units(pipeline_path: str, dhis2_client_target: DHIS2, config: dict, run_task: bool) -> None:
@@ -305,6 +304,10 @@ def push_analytics(pipeline_path: str, dhis2_client_target: DHIS2, config: dict,
         current_run.log_info(f"Processing analytics file: {analytics_filename}")
         try:
             analytics_data = get_file_from_dataset(config["SETTINGS"].get("OPENHEXA_DATASET_ID"), analytics_filename)
+        except Exception as e:
+            raise Exception(f"Error reading analytics file {analytics_filename}. Error: {e!s}") from e
+
+        try:
             # The number of data points will be less after mapping, as some of them will be filtered out
             # according to the mapping rules (e.g. COC mappings for data elements)
             df_de_mapped = apply_dataelement_mappings(
@@ -318,11 +321,14 @@ def push_analytics(pipeline_path: str, dhis2_client_target: DHIS2, config: dict,
                 df=analytics_data[analytics_data["data_type"] == "INDICATOR"],
                 mappings=config.get("ACM_INDICATOR_MAPPING"),
             )
+        except Exception as e:
+            raise Exception(f"Error applying mappings for analytics file {analytics_filename}. Error: {e!s}") from e
 
-            df_mapped = pd.concat([df_de_mapped, df_rr_mapped, df_ind_mapped], ignore_index=True)
-            df_mapped = df_mapped.sort_values(by=["org_unit"], ascending=True)
-            df_mapped["value"] = df_mapped["value"].replace("None", pd.NA)  # Ensure string "None" is treated as NA
+        df_mapped = pd.concat([df_de_mapped, df_rr_mapped, df_ind_mapped], ignore_index=True)
+        df_mapped = df_mapped.sort_values(by=["org_unit"], ascending=True)
+        df_mapped["value"] = df_mapped["value"].replace("None", pd.NA)  # Ensure string "None" is treated as NA
 
+        try:
             # push data
             pusher.push_data(df_data=df_mapped)
             current_run.log_info(f"Analytics data push finished for extract: {analytics_filename}.")
