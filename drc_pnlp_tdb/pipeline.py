@@ -34,14 +34,24 @@ from utils import get_file_from_dataset, get_matching_filenames_from_dataset
     default=False,
     required=True,
 )
-def pnlp_extract_process(get_year: int, get_run_notebooks: bool):
+@parameter(
+    "load_ds_data",
+    name="Load DS data",
+    help="Whether or not to load the data from the dataset (if False, it will use the existing data in the pipeline)",
+    type=bool,
+    default=True,
+    required=True,
+)
+def pnlp_extract_process(get_year: int, get_run_notebooks: bool, load_ds_data: bool):
     """Main pipeline code."""
     # setup variables
     pipeline_path = Path(workspace.files_path) / "pnlp-tdb-pipeline"
     intput_nb = "LAUNCHER.ipynb"
 
     # extract data from DHIS
-    extract_dhis_data(pipeline_path=pipeline_path, input_data_path=pipeline_path / "data", year=get_year)
+    extract_dhis_data(
+        pipeline_path=pipeline_path, input_data_path=pipeline_path / "data", year=get_year, load_ds_data=load_ds_data
+    )
 
     # run processing code in notebook
     if get_run_notebooks:
@@ -52,7 +62,7 @@ def pnlp_extract_process(get_year: int, get_run_notebooks: bool):
         )
 
 
-def extract_dhis_data(pipeline_path: Path, input_data_path: Path, year: int) -> None:
+def extract_dhis_data(pipeline_path: Path, input_data_path: Path, year: int, load_ds_data: bool) -> None:
     """Extracts DHIS2 data for the specified year and processes it."""
     current_run.log_info("Connecting to DHIS2 instance and extracting metadata")
     # Connect and get DHIS2 metadata
@@ -60,7 +70,8 @@ def extract_dhis_data(pipeline_path: Path, input_data_path: Path, year: int) -> 
     org_units = get_organisation_units(dhis2=dhis2_client)
     org_units_lvl5 = org_units.filter(pl.col("level") == 5).to_pandas()  # fosa levels
 
-    refresh_snis_extracts_from_dataset(pipeline_path=pipeline_path, dataset_id="snis-extracts")
+    if load_ds_data:
+        refresh_snis_extracts_from_dataset(pipeline_path=pipeline_path, dataset_id="snis-extracts")
 
     extract_periods_routine = get_quarters_until_now(year)
     for period in extract_periods_routine:
