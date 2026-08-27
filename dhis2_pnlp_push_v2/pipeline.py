@@ -96,6 +96,7 @@ def dhis2_pnlp_push_v2(push_orgunits: bool, push_pop: bool, push_analytics_task:
             )
         except Exception as e:
             current_run.log_error(f"An error occurred: {e}")
+            raise
     else:
         current_run.log_info("No updates found. Pipeline execution skipped.")
 
@@ -236,7 +237,7 @@ def push_population(pipeline_path: str, dhis2_client_target: DHIS2, config: dict
             pusher.push_data(df_data=pop_data_mapped)
             current_run.log_info(f"Population data push finished for extract: {pop_filename}.")
         except Exception as e:
-            raise Exception(f"Error for extract {pop_filename}), stopping push process. Error: {e!s}") from e
+            raise Exception(f"Error during push of {pop_filename}, stopping push process. Error: {e!s}") from e
         finally:
             save_logs(logs_file, output_dir=pipeline_path / "logs" / "push_population")
 
@@ -333,7 +334,7 @@ def push_analytics(pipeline_path: str, dhis2_client_target: DHIS2, config: dict,
             pusher.push_data(df_data=df_mapped)
             current_run.log_info(f"Analytics data push finished for extract: {analytics_filename}.")
         except Exception as e:
-            raise Exception(f"Error for extract {analytics_filename}), stopping push process. Error: {e}") from e
+            raise Exception(f"Error during push of {analytics_filename}, stopping push process. Error: {e}") from e
         finally:
             save_logs(logs_file, output_dir=pipeline_path / "logs" / "push_analytics")
 
