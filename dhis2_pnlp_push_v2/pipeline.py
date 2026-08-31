@@ -222,6 +222,7 @@ def push_population(pipeline_path: str, dhis2_client_target: DHIS2, config: dict
         dry_run=dry_run,
         max_post=max_post,
         logger=logger,
+        cache_path=pipeline_path / "cache" / "push_population",
     )
 
     # logic changed to loop over available files to push.
@@ -300,6 +301,7 @@ def push_analytics(pipeline_path: str, dhis2_client_target: DHIS2, config: dict,
         dry_run=dry_run,
         max_post=max_post,
         logger=logger,
+        cache_path=pipeline_path / "cache" / "push_analytics",
     )
     for analytics_filename in analytics_filenames:
         current_run.log_info(f"Processing analytics file: {analytics_filename}")
