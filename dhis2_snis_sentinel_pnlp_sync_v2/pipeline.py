@@ -112,14 +112,6 @@ def push_extracts(pipeline_path: Path, dataset_id: str, run_task: bool = True) -
     # log parameters
     current_run.log_info(f"Import strategy: {import_strategy} - Dry Run: {dry_run} - Max post: {max_post}")
 
-    pusher = DHIS2Pusher(
-        dhis2_client=dhis2_client_target,
-        import_strategy=import_strategy,
-        dry_run=dry_run,
-        max_post=max_post,
-        logger=logger,
-    )
-
     # Get files to push from updates_collector.json file in the dataset.
     files_to_push = get_file_from_dataset(dataset_id=dataset_id, filename="updates_collector.json")
     for node, file_list in files_to_push.items():
@@ -133,19 +125,28 @@ def push_extracts(pipeline_path: Path, dataset_id: str, run_task: bool = True) -
             current_run.log_warning(f"No extract configuration found for node {node}, skipping.")
             continue
 
+        pusher = DHIS2Pusher(
+            dhis2_client=dhis2_client_target,
+            import_strategy=import_strategy,
+            dry_run=dry_run,
+            max_post=max_post,
+            logger=logger,
+            cache_path=pipeline_path / "cache" / node,
+        )
+
         for filename in file_list:
             current_run.log_info(f"Processing analytics file: {filename}")
-            try:
-                # Load data from dataset (extracted from DSNIS workspace pipeline: dhis2-snis-sentinel-extract)
-                df_data = get_file_from_dataset(dataset_id=dataset_id, filename=filename)
-                df_mapped = apply_data_element_mappings(
-                    df=df_data,
-                    extract=extract_config,
-                )
+            logger.info(f"Processing analytics file: {filename}")
 
-                # Sort the dataframe by org_unit to reduce import time (hopefully)
-                df_mapped = df_mapped.sort_values(by=["org_unit"], ascending=True)
-                df_mapped["value"] = df_mapped["value"].replace("None", pd.NA)  # Ensure string "None" is treated as NA
+            # Load data from dataset (extracted from DSNIS workspace pipeline: dhis2-snis-sentinel-extract)
+            df_data = get_file_from_dataset(dataset_id=dataset_id, filename=filename)
+            df_mapped = apply_data_element_mappings(df=df_data, extract=extract_config)
+
+            # Sort the dataframe by org_unit to reduce import time (hopefully)
+            df_mapped = df_mapped.sort_values(by=["org_unit"], ascending=True)
+            df_mapped["value"] = df_mapped["value"].replace("None", pd.NA)  # Ensure string "None" is treated as NA
+
+            try:
                 pusher.push_data(df_data=df_mapped)
                 current_run.log_info(f"Data elements data push finished for extract: {filename}.")
             except Exception as e:
