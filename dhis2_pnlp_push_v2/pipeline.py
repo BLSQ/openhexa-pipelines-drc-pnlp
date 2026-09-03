@@ -3,6 +3,7 @@ from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
+import polars as pl
 from d2d_development.push import DHIS2Pusher
 from openhexa.sdk import current_run, parameter, pipeline, workspace
 from openhexa.toolbox.dhis2 import DHIS2
@@ -281,7 +282,7 @@ def push_analytics(pipeline_path: str, dhis2_client_target: DHIS2, config: dict,
 
     current_run.log_info("Starting analytics push.")
     logger, logs_file = configure_logging(logs_path=Path("/home/jovyan/tmp/logs"), task_name="push_analytics")
-    # logger, logs_file = configure_logging(logs_path=pipeline_path / "logs", task_name="push_analytics")  # local
+    # logger, logs_file = configure_logging(logs_path=pipeline_path / "logs", task_name="push_analytics")  ## local
 
     # Load data from dataset
     analytics_filenames = get_matching_filenames_from_dataset(
@@ -357,11 +358,12 @@ def apply_dataelement_mappings(df: pd.DataFrame, mappings: dict) -> pd.DataFrame
     # by the expected COC depending on the period (>=202501)
     if df.period.iloc[0] >= "202501":
         df = apply_dataelement_coc_mappings_2025(
-            df=df, mappings_coc_2025=mappings.get("CAT_OPTION_COMBO", {}).get("MAPPINGS_2025")
+            df=df,
+            mappings_coc_2025=mappings.get("CAT_OPTION_COMBO", {}).get("MAPPINGS_2025"),
         )
     else:
         df = apply_dataelement_coc_mappings_2024(
-            df=df, mappings_coc_2024=mappings("CAT_OPTION_COMBO", {}).get("MAPPINGS_2024")
+            df=df, mappings_coc_2024=mappings.get("CAT_OPTION_COMBO", {}).get("MAPPINGS_2024")
         )
 
     # map attribute option combo default
@@ -372,54 +374,64 @@ def apply_dataelement_mappings(df: pd.DataFrame, mappings: dict) -> pd.DataFrame
     return df
 
 
-def apply_dataelement_coc_mappings_2025(df: pd.DataFrame, mappings_coc_2025: dict) -> pd.DataFrame:
-    """Applies the mappings for data elements to the given DataFrame according to the 2025 COC mapping rules.
+def apply_dataelement_coc_mappings_2025(
+    df: pd.DataFrame,
+    mappings_coc_2025: dict,
+) -> pd.DataFrame:
+    """Applies data element mappings to the data elements.
 
-    Any data element uid mapped in the configuration will be filtered to only keep rows with the category option combos
-    (COC) specified in the mapping for that uid.
-    Then, the selected COC values will be mapped following the configuration.
-    Default COC and AOC mappings specified in the configuration are applied to all None values.
+    This function applies the mappings for COC (Category Option Combo) to the data elements.
+    It also applies general COC mappings to all other COCs in the extract.
+    NOTE: The result is a dataframe filtered based on the provided mappings for "DX" and "COC".
+
+    Args:
+        df: DataFrame containing the extracted data.
+        mappings_coc_2025: Dictionary containing the extract mappings.
 
     Returns:
-        pd.DataFrame: The DataFrame with the applied mappings.
+        DataFrame with the applied data element mappings.
     """
-    if mappings_coc_2025 is None:
-        raise ValueError("No MAPPINGS_2025 found in the configuration file.")
+    if len(mappings_coc_2025["UIDS"]) == 0:
+        current_run.log_warning("No extract details provided, skipping data element mappings.")
+        return df
 
-    df = df.copy()
-    current_run.log_debug("Running 2025 COC mappings.")
+    df = pl.from_pandas(df.copy())
 
-    # map category option combo default
-    coc_default = mappings_coc_2025.get("DEFAULT")
-    if coc_default:
-        df["attribute_option_combo"] = df["attribute_option_combo"].fillna(coc_default)
+    # Loop over the configured data element mappings to filter by COC/AOC if provided
+    current_run.log_info("Applying data element mappings.")
+    chunks = []
+    for uid, mapping in mappings_coc_2025["UIDS"].items():
+        df_indicator = df.filter(pl.col("dx") == uid)  # Select dx matching coc mappings
+        if df_indicator.is_empty():
+            current_run.log_warning(f"No matching data for data element: {uid}.")
+            continue
 
-    # Loop over the DataElement COC mappings:
-    # For each uid, remove rows where the COC is not in the allowed mapping,
-    # then replace the remaining COC values with the mapped ones
-    for uid, coc_uids in mappings_coc_2025["UIDS"].items():
-        uid_clean = uid.strip()
-        coc_mapping = {k.strip(): v.strip() for k, v in coc_uids.items()}
-        allowed_cocs = set(coc_mapping.keys())
+        mapping_clean = {k.strip(): v.strip() for k, v in mapping.items()}
+        df_indicator = df_indicator.filter(pl.col("category_option_combo").is_in(mapping_clean.keys()))
+        df_indicator = df_indicator.with_columns(pl.col("category_option_combo").replace(mapping_clean))
+        chunks.append(df_indicator)
 
-        # Step 1: Remove rows where the COC is not in the allowed mapping for this uid
-        is_target_uid = df["dx"] == uid_clean
-        is_invalid_coc = is_target_uid & ~df["category_option_combo"].isin(allowed_cocs)
-        df = df[~is_invalid_coc].copy()
-
-        # Step 2: Replace COC values using the mapping
-        is_target_uid = df["dx"] == uid_clean  # reindex after filtering
-        df.loc[is_target_uid, "category_option_combo"] = df.loc[is_target_uid, "category_option_combo"].replace(
-            coc_mapping
-        )
+    if len(chunks) == 0:
+        current_run.log_warning("No data elements matched the provided mappings.")
+        df_coc_mapped = df.clear()  # empty df, same schema as df
+    else:
+        df_coc_mapped = pl.concat(chunks)
 
     # Apply COC General mappings (to all other COC in the extract)
-    gen_mappings = mappings_coc_2025.get("GENERAL_MAPPINGS")
+    gen_mappings = mappings_coc_2025.get("GENERAL_COC_MAPPINGS", {})
     gen_mappings_clean = {k.strip(): v.strip() for k, v in gen_mappings.items()}
-    if gen_mappings_clean:
-        df.loc[:, "category_option_combo"] = df.loc[:, "category_option_combo"].replace(gen_mappings_clean)
+    mapped_uids = set(mappings_coc_2025["UIDS"].keys())
+    df_general = df.filter(
+        (~pl.col("dx").is_in(mapped_uids)) & pl.col("category_option_combo").is_in(list(gen_mappings_clean.keys()))
+    )
+    if df_general.is_empty():
+        current_run.log_warning("No data matched the general COC mappings.")
+        df_general = df.clear()  # empty df, same schema as df
+    else:
+        df_general = df_general.with_columns(pl.col("category_option_combo").replace(gen_mappings_clean))
 
-    return df
+    df_mapped = pl.concat([df_coc_mapped, df_general])
+    return df_mapped.to_pandas()
 
 
 def apply_dataelement_coc_mappings_2024(df: pd.DataFrame, mappings_coc_2024: dict) -> pd.DataFrame:
@@ -441,14 +453,14 @@ def apply_dataelement_coc_mappings_2024(df: pd.DataFrame, mappings_coc_2024: dic
         df["category_option_combo"] = df["category_option_combo"].fillna(coc_default)
 
     # Replace COC values using the provided mappings
-    coc_mappings = mappings_coc_2024.get("MAPPINGS", {})
+    coc_mappings = {k.strip(): v.strip() for k, v in mappings_coc_2024.get("MAPPINGS", {}).items()}
     coc_to_replace = set(df["category_option_combo"]).intersection(coc_mappings.keys())  # just for logging
     if coc_to_replace:
         current_run.log_info(f"{len(coc_to_replace)} COC values will be replaced using mappings.")
         df["category_option_combo"] = df["category_option_combo"].replace(coc_mappings)
 
     # Remove rows with COC values in the ignore list
-    coc_to_remove = mappings_coc_2024.get("IGNORE_MAPPINGS", [])
+    coc_to_remove = [x.strip() for x in mappings_coc_2024.get("IGNORE_MAPPINGS", [])]
     if coc_to_remove:
         current_run.log_info(f"{len(coc_to_remove)} COC values will be ignored and removed.")
         df = df[~df["category_option_combo"].isin(coc_to_remove)]
