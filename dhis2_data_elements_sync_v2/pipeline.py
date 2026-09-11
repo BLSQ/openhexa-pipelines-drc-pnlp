@@ -2,6 +2,7 @@ from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
+import polars as pl
 from d2d_development.push import DHIS2Pusher
 from openhexa.sdk import current_run, parameter, pipeline, workspace
 from org_units_aligner.org_units_aligner import DHIS2PyramidAligner
@@ -166,6 +167,7 @@ def push_extracts(pipeline_path: Path, dataset_id: str, run_task: bool) -> None:
         dry_run=dry_run,
         max_post=max_post,
         logger=logger,
+        cache_path=pipeline_path / "cache",
     )
 
     for filename in extract_filenames:
@@ -179,10 +181,17 @@ def push_extracts(pipeline_path: Path, dataset_id: str, run_task: bool) -> None:
                 coc_default=config_push.get("CAT_OPTION_COMBO_DEFAULT", {}).get("default", {}),
                 aoc_default=config_push.get("ATTR_OPTION_COMBO_DEFAULT", {}).get("default", {}),
             )
+        except Exception as e:
+            raise Exception(
+                f"Error applying data element mappings for extract {filename}, stopping push process. Error: {e}"
+            ) from e
 
-            # Sort the dataframe by org_unit to reduce import time (hopefully)
-            df_mapped = df_mapped.sort_values(by=["org_unit"], ascending=True)
-            df_mapped["value"] = df_mapped["value"].replace("None", pd.NA)  # Ensure string "None" is treated as NA
+        # Sort the dataframe by org_unit to reduce import time (hopefully)
+        df_mapped = df_mapped.sort(by="org_unit", descending=False)
+        df_mapped = df_mapped.with_columns(
+            pl.when(pl.col("value") == "None").then(None).otherwise(pl.col("value")).alias("value")
+        )
+        try:
             pusher.push_data(df_data=df_mapped)
             current_run.log_info(f"Data elements data push finished for extract: {filename}.")
         except Exception as e:
@@ -193,59 +202,58 @@ def push_extracts(pipeline_path: Path, dataset_id: str, run_task: bool) -> None:
     current_run.log_info("Data elements push completed.")
 
 
-def apply_data_element_mappings(df: pd.DataFrame, mappings: dict, coc_default: str, aoc_default: str) -> pd.DataFrame:
+def apply_data_element_mappings(df: pd.DataFrame, mappings: dict, coc_default: str, aoc_default: str) -> pl.DataFrame:
     """All matching ids will be replaced. Is user responsability to provide the correct UIDS.
 
-    Returns:
-        pd.DataFrame: DataFrame with the mapped COC and AOC values.
-    """
-    df = df.copy()
-    dataelement_mask = df["data_type"] == "DATA_ELEMENT"
+    This is a filter, not an in-place update: the returned DataFrame contains only rows with
+    data_type == "DATA_ELEMENT" whose dx is a key in `mappings` and whose category_option_combo
+    is one of that mapping's CAT_OPTION_COMBO keys. Every other row (non-DATA_ELEMENT rows, or
+    DATA_ELEMENT rows not covered by `mappings`) is dropped from the result.
 
-    # set all COC None to Default values
-    if coc_default:
-        current_run.log_info(f"Using {coc_default} default COC for data elements.")
-        mask = dataelement_mask & df["category_option_combo"].isna()
-        df.loc[mask, "category_option_combo"] = coc_default
+    Returns:
+        pl.DataFrame: DataFrame with the mapped COC and AOC values.
+    """
+    df = pl.from_pandas(df)
+    df = df.filter(df["data_type"] == "DATA_ELEMENT")  # DE mapppings
+
+    # Loop over the DataElement COC mappings
+    chunks = []
+    for uid, mapping in mappings.items():
+        uid_str = str(uid).strip()
+        df_de = df.filter(df["dx"] == uid_str)
+
+        if df_de.is_empty():
+            current_run.log_warning(f"No matching data for data element: {uid}.")
+            continue
+
+        coc_uids_map = {str(k).strip(): str(v).strip() for k, v in mapping.get("CAT_OPTION_COMBO", {}).items()}
+        df_de = df_de.filter(df_de["category_option_combo"].is_in(list(coc_uids_map.keys())))
+
+        if df_de.is_empty():
+            current_run.log_warning(f"No matching category option combo for data element: {uid}.")
+            continue
+
+        df_de = df_de.with_columns(pl.col("category_option_combo").replace(coc_uids_map))
+
+        # for AOC there are no mappings (we could repeat the logic avobe if there was something to filter)
+        chunks.append(df_de)
+
+    if len(chunks) == 0:
+        current_run.log_warning("No data elements matched the provided mappings.")
+        df_coc_mapped = df.clear()  # empty df, same schema as df
+    else:
+        df_coc_mapped = pl.concat(chunks)
 
     # set all AOC None to Default values
     if aoc_default:
-        current_run.log_info(f"Using {aoc_default} default AOC for data elements.")
-        mask = dataelement_mask & df["attribute_option_combo"].isna()
-        df.loc[mask, "attribute_option_combo"] = aoc_default
+        df_coc_mapped = df_coc_mapped.with_columns(
+            pl.when(df_coc_mapped["attribute_option_combo"].is_null())
+            .then(aoc_default)
+            .otherwise(df_coc_mapped["attribute_option_combo"])
+            .alias("attribute_option_combo")
+        )
 
-    # Loop over the DataElement COC mappings
-    for uid, mapping in mappings.items():
-        uid_str = str(uid).strip()
-        # Set COC variable mappings
-        coc_uids_map = mapping.get("CAT_OPTION_COMBO", {})
-        coc_uids_map = {str(k).strip(): str(v).strip() for k, v in coc_uids_map.items()}
-        allowed_cocs = list(coc_uids_map.keys()) + ([coc_default] if coc_default else [])
-
-        # Set AOC variable mappings
-        aoc_uids_map = mapping.get("ATTR_OPTION_COMBO", {})
-        aoc_uids_map = {str(k).strip(): str(v).strip() for k, v in aoc_uids_map.items()}
-        allowed_aocs = list(aoc_uids_map.keys()) + ([aoc_default] if aoc_default else [])
-
-        # Step 1: Remove rows where the dx matches, but the COC is not in the allowed list
-        mask_uid = (df["data_type"] == "DATA_ELEMENT") & (df["dx"] == uid_str)
-
-        # Remove rows where COC is not in the allowed list
-        if allowed_cocs:
-            coc_mask_to_remove = mask_uid & ~df["category_option_combo"].isin(allowed_cocs)
-            df = df[~coc_mask_to_remove].copy()
-
-        # Remove rows where AOC is not in the allowed list
-        if allowed_aocs:
-            aoc_mask_to_remove = mask_uid & ~df["attribute_option_combo"].isin(allowed_aocs)
-            df = df[~aoc_mask_to_remove].copy()
-
-        # Step 2: Replace remaining COC/AOC values using the provided mapping
-        mask_uid = (df["data_type"] == "DATA_ELEMENT") & (df["dx"] == uid_str)  # reindexing
-        df.loc[mask_uid, "category_option_combo"] = df.loc[mask_uid, "category_option_combo"].replace(coc_uids_map)
-        df.loc[mask_uid, "attribute_option_combo"] = df.loc[mask_uid, "attribute_option_combo"].replace(aoc_uids_map)
-
-    return df
+    return df_coc_mapped
 
 
 def update_last_run_timestamp(timestamp_filename: Path, dataset_id: str) -> None:
