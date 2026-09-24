@@ -246,12 +246,7 @@ def apply_data_element_mappings(df: pd.DataFrame, mappings: dict, coc_default: s
 
     # set all AOC None to Default values
     if aoc_default:
-        df_coc_mapped = df_coc_mapped.with_columns(
-            pl.when(df_coc_mapped["attribute_option_combo"].is_null())
-            .then(aoc_default)
-            .otherwise(df_coc_mapped["attribute_option_combo"])
-            .alias("attribute_option_combo")
-        )
+        df_coc_mapped = df_coc_mapped.with_columns(pl.col("attribute_option_combo").fill_null(pl.lit(aoc_default)))
 
     return df_coc_mapped
 

@@ -4,7 +4,7 @@
 		"IMPORT_STRATEGY": "CREATE_AND_UPDATE",
 		"DRY_RUN": false,
 		"MAX_POST": 10000,
-		"PUSH_WAIT" : 10
+		"PUSH_WAIT" : 5
 	},
 	"DATAELEMENT_MAPPINGS": {		
 		"QxEEqOShKJl" : {
@@ -252,10 +252,10 @@
 		}
 	},
 	"CAT_OPTION_COMBO_DEFAULT": {
-		"HllvX50cXC0" : "HllvX50cXC0"
+		"default" : "HllvX50cXC0"
 	},
 	"ATTR_OPTION_COMBO_DEFAULT": {
-		"HllvX50cXC0" : "HllvX50cXC0"
+		"default" : "HllvX50cXC0"
 	}
 }
 
