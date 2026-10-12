@@ -7,6 +7,10 @@ workspace/pnlp-tdb-pipeline/*
 workspace/pnlp-tdb-pipeline/scripts/*
 !workspace/pnlp-tdb-pipeline/scripts/*.ipynb
 !workspace/pnlp-tdb-pipeline/scripts/*.R
+!workspace/pnlp-tdb-pipeline/superset_scripts/
+workspace/pnlp-tdb-pipeline/superset_scripts/*
+!workspace/pnlp-tdb-pipeline/superset_scripts/*.ipynb
+!workspace/pnlp-tdb-pipeline/superset_scripts/*.py
 
 
 workspace.yaml
