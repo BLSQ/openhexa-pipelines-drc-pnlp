@@ -1,5 +1,15 @@
-workspace/
+# OpenHexa workspace files: ignored, except the TDB processing code (notebooks + R helpers)
+!workspace/
+workspace/*
+!workspace/pnlp-tdb-pipeline/
+workspace/pnlp-tdb-pipeline/*
+!workspace/pnlp-tdb-pipeline/scripts/
+workspace/pnlp-tdb-pipeline/scripts/*
+!workspace/pnlp-tdb-pipeline/scripts/*.ipynb
+!workspace/pnlp-tdb-pipeline/scripts/*.R
+
+
 workspace.yaml
 pipelines
-pnlp-tdb-pipeline
+/pnlp-tdb-pipeline
 __pycache__/
