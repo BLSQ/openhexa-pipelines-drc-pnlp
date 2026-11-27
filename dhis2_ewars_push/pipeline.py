@@ -869,7 +869,7 @@ def push_data_elements(
         "ERRORS": [],
     }
 
-    dry_run = config.get("dry_run", True)
+    dry_run = config.get("DRY_RUN", True)
 
     total_datapoints = len(data_elements_list)
     count = 0
@@ -924,7 +924,7 @@ def push_data_elements(
                 f"{count * max_post} / {total_datapoints} data points pushed summary: {summary['import_counts']}"
             )
 
-    current_run.log_info(f"Push completed. Final summary: {summary['import_counts']}")
+    current_run.log_info(f"Push completed, mode dry_run = {dry_run}. Final summary: {summary['import_counts']}")
 
     return summary
 
