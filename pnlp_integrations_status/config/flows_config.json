@@ -1,0 +1,207 @@
+{
+  "workspace_slug": "drc-pnlp-ccd423",
+  "app_url": "https://app.openhexa.org",
+  "output_dir": "pipelines/pnlp_integrations_status/output",
+  "runs_to_scan": 5,
+  "max_snapshot_age_hours": 24,
+  "target": {
+    "name": "DHIS2 - NMDR DRC",
+    "slug": "dhis2-nmdr-drc",
+    "url": "https://nmdr.rdc.implementation.bluesquare.org"
+  },
+  "flows": [
+    {
+      "id": "climate",
+      "label": "Données climatiques",
+      "source": "ERA5",
+      "connections": [
+        { "name": "Climate data store", "slug": "climate-data-store", "url": "https://cds.climate.copernicus.eu" },
+        { "name": "DHIS2 - NMDR DRC", "slug": "dhis2-nmdr-drc", "url": "https://nmdr.rdc.implementation.bluesquare.org" }
+      ],
+      "datasets": [
+        { "slug": "climate-dataset-precipi-6349a3", "produced_by": "era5-precipitation-aggregate" },
+        { "slug": "climate-dataset-tempera-39e1f8", "produced_by": "era5-temperature-aggregate" }
+      ],
+      "steps": [
+        { "code": "era5-precipitation-extract", "role": "extract", "interval_days": 7 },
+        { "code": "era5-temperature-extract", "role": "extract", "interval_days": 7 },
+        { "code": "era5-humidity-extract", "role": "extract", "interval_days": 16 },
+        { "code": "era5-precipitation-aggregate", "role": "transform", "interval_days": 7 },
+        { "code": "era5-temperature-aggregate", "role": "transform", "interval_days": 7 },
+        { "code": "era5-relative-humidity-aggregate", "role": "transform", "interval_days": 16 },
+        { "code": "dhis2-climate-push", "role": "push", "interval_days": 11 }
+      ],
+      "checks": [
+        {
+          "type": "state_dates",
+          "path": "pipelines/dhis2_climate_push/config/last_pushed_date.json",
+          "step": "dhis2-climate-push",
+          "keys": {
+            "precipitation": { "label": "Précipitations", "message_label": "precipitation", "max_age_days": 21 },
+            "temperature_min": { "label": "Température min", "message_label": "temperature min", "max_age_days": 21 },
+            "temperature_max": { "label": "Température max", "message_label": "temperature max", "max_age_days": 21 },
+            "relative_humidity": { "label": "Humidité relative", "message_label": "relative humidity", "max_age_days": 75 }
+          }
+        }
+      ],
+      "flags": []
+    },
+    {
+      "id": "dse",
+      "label": "DSE Palu",
+      "source": "DSE",
+      "connections": [
+        { "name": "DRC SNIS", "slug": "drc-snis" },
+        { "name": "DHIS2 - NMDR DRC", "slug": "dhis2-nmdr-drc", "url": "https://nmdr.rdc.implementation.bluesquare.org" }
+      ],
+      "datasets": [
+        { "slug": "pnlp-weekly-malaria-dat-4ae811", "produced_by": "DRC DSE" }
+      ],
+      "steps": [
+        { "code": "pnlp-tables-update", "role": "transform", "interval_days": 1 },
+        { "code": "dhis2-dse-push", "role": "push", "interval_days": 16 }
+      ],
+      "checks": [
+        {
+          "type": "state_dates",
+          "path": "pipelines/dhis2_dse_push/config/last_pushed_DSE_date.json",
+          "step": "dhis2-dse-push",
+          "source_step": "pnlp-tables-update",
+          "keys": {
+            "dse_database": { "label": "Base DSE palu", "message_label": "DSE database", "source_table": "DSE_palu_for_PNLP_tot", "max_age_days": 35 },
+            "dse_completude": { "label": "Complétude DSE", "message_label": "DSE completude", "source_table": "DSE_Completude", "max_age_days": 35 }
+          }
+        }
+      ],
+      "flags": []
+    },
+    {
+      "id": "ewars",
+      "label": "EWARS",
+      "source": "EWARS",
+      "connections": [
+        { "name": "EWARS", "slug": "ewars", "url": "https://dse.ewars.ws" },
+        { "name": "DRC SNIS", "slug": "drc-snis" },
+        { "name": "DHIS2 - NMDR DRC", "slug": "dhis2-nmdr-drc", "url": "https://nmdr.rdc.implementation.bluesquare.org" }
+      ],
+      "datasets": [],
+      "steps": [
+        { "code": "dhis2-ewars-push", "role": "push", "interval_days": 7 }
+      ],
+      "checks": [
+        {
+          "type": "config_dry_run",
+          "path": "pipelines/dhis2_ewars_push/config/config_ewars_push.json",
+          "key": "DRY_RUN",
+          "step": "dhis2-ewars-push"
+        },
+        { "type": "ewars_forms", "step": "dhis2-ewars-push", "max_age_days": 21 }
+      ],
+      "flags": []
+    },
+    {
+      "id": "sp",
+      "label": "SP",
+      "source": "DHIS2 SP",
+      "connections": [
+        { "name": "dhis2-snis-sp-drc", "slug": "dhis2-snis-sp-drc", "url": "https://sp.snisrdc.com" },
+        { "name": "DHIS2 - NMDR DRC", "slug": "dhis2-nmdr-drc", "url": "https://nmdr.rdc.implementation.bluesquare.org" }
+      ],
+      "datasets": [],
+      "steps": [
+        { "code": "dhis2-sp-pnlp-sync", "role": "push", "interval_days": 7 }
+      ],
+      "checks": [
+        {
+          "type": "latest_period_file",
+          "label": "Données SP",
+          "prefix": "pipelines/dhis2_sp_pnlp_sync/data/extracts/indicator/",
+          "pattern": "*/data_*.parquet",
+          "period_regex": "data_(\\d{6})\\.parquet$",
+          "max_lag_months": 1,
+          "step": "dhis2-sp-pnlp-sync"
+        },
+        { "type": "source_periods", "step": "dhis2-sp-pnlp-sync" }
+      ],
+      "flags": []
+    },
+    {
+      "id": "snis-analytics",
+      "label": "SNIS Analytics",
+      "source": "SNIS",
+      "connections": [
+        { "name": "DHIS2 - NMDR DRC", "slug": "dhis2-nmdr-drc", "url": "https://nmdr.rdc.implementation.bluesquare.org" }
+      ],
+      "datasets": [
+        { "slug": "snis-extracts", "produced_by": "DHIS2 SNIS extract (dhis2-snis-extract) — DRC DSNIS" }
+      ],
+      "steps": [
+        { "code": "dhis2-pnlp-push-v2", "role": "push", "interval_days": 7 }
+      ],
+      "checks": [
+        {
+          "type": "dataset_vs_last_update",
+          "dataset": "snis-extracts",
+          "path": "pipelines/dhis2_pnlp_push_v2/config/last_update.json",
+          "step": "dhis2-pnlp-push-v2",
+          "grace_days": 8
+        }
+      ],
+      "flags": []
+    },
+    {
+      "id": "snis-data-elements",
+      "label": "SNIS Data elements",
+      "source": "SNIS",
+      "connections": [
+        { "name": "DHIS2 - NMDR DRC", "slug": "dhis2-nmdr-drc", "url": "https://nmdr.rdc.implementation.bluesquare.org" }
+      ],
+      "datasets": [
+        {
+          "slug": "snis-data-elements-extracts",
+          "produced_by": "DHIS2 SNIS data elements extract (dhis2-snis-data-elements-extract) — DRC DSNIS"
+        }
+      ],
+      "steps": [
+        { "code": "dhis2-data-elements-sync-v2", "role": "push", "interval_days": 7 }
+      ],
+      "checks": [
+        {
+          "type": "dataset_vs_last_update",
+          "dataset": "snis-data-elements-extracts",
+          "path": "pipelines/dhis2_data_elements_sync_v2/config/last_update.json",
+          "step": "dhis2-data-elements-sync-v2",
+          "grace_days": 8
+        }
+      ],
+      "flags": []
+    },
+    {
+      "id": "snis-sentinel",
+      "label": "SNIS Sites sentinelles",
+      "source": "SNIS",
+      "connections": [
+        { "name": "DHIS2 - NMDR DRC", "slug": "dhis2-nmdr-drc", "url": "https://nmdr.rdc.implementation.bluesquare.org" }
+      ],
+      "datasets": [
+        {
+          "slug": "snis-sentinel-dataset",
+          "produced_by": "DHIS2 SNIS sentinel extract (dhis2-snis-sentinel-extract) — DRC DSNIS"
+        }
+      ],
+      "steps": [
+        { "code": "dhis2-snis-sentinel-pnlp-sync-v2", "role": "push", "interval_days": 7 }
+      ],
+      "checks": [
+        {
+          "type": "dataset_vs_last_update",
+          "dataset": "snis-sentinel-dataset",
+          "path": "pipelines/dhis2_snis_sentinel_pnlp_sync_v2/config/last_update.json",
+          "step": "dhis2-snis-sentinel-pnlp-sync-v2",
+          "grace_days": 8
+        }
+      ],
+      "flags": []
+    }
+  ]
+}
