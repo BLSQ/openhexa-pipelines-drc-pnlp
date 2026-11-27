@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PNLP Data Integrations</title>
+    <!-- Local development: only active on file:// and localhost, inert once deployed. -->
+    <script
+      src="https://api.openhexa.org/webapps/dev.js"
+      data-workspace-slug="drc-pnlp-ccd423"
+      data-webapp-slug="pnlp-data-integrations"
+    ></script>
+    <link rel="stylesheet" href="style.css" />
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <header class="page-header">
+      <div class="title-block">
+        <h1>Intégrations de données vers NMDR</h1>
+        <p class="subtitle" id="target">Instance cible : DHIS2 - NMDR DRC</p>
+        <p class="meta" id="meta">Chargement…</p>
+      </div>
+      <div class="refresh-block">
+        <button type="button" id="refresh" class="button" disabled>Actualiser</button>
+        <p class="refresh-status" id="refresh-status" aria-live="polite"></p>
+      </div>
+    </header>
+
+    <section class="counters" id="counters" aria-label="Résumé des statuts"></section>
+
+    <main>
+      <div class="table-wrap">
+        <table class="flows">
+          <thead>
+            <tr>
+              <th scope="col">Statut</th>
+              <th scope="col">Flux</th>
+              <th scope="col">Dernière donnée source</th>
+              <th scope="col">Dernière donnée poussée</th>
+              <th scope="col">Dernier push</th>
+              <th scope="col">Alertes</th>
+            </tr>
+          </thead>
+          <tbody id="flows"></tbody>
+        </table>
+      </div>
+      <p class="empty" id="message" hidden></p>
+    </main>
+  </body>
+</html>

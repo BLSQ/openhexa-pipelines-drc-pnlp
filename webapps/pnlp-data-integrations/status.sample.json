@@ -1,0 +1,1536 @@
+{
+  "generated_at": "2026-11-27T11:37:54.127627+00:00",
+  "checked_at": "2026-11-27T11:37:54.127627+00:00",
+  "fingerprint": "5b8e923b6bbdfb9e",
+  "collector_run_url": null,
+  "target": {
+    "name": "DHIS2 - NMDR DRC",
+    "slug": "dhis2-nmdr-drc",
+    "url": "https://nmdr.rdc.implementation.bluesquare.org"
+  },
+  "status": "error",
+  "flows": [
+    {
+      "id": "climate",
+      "label": "Données climatiques",
+      "source": "ERA5",
+      "status": "ok",
+      "flags": [],
+      "freshness": [
+        {
+          "label": "Précipitations",
+          "source": "2026-11-09",
+          "pushed": "2026-11-09"
+        },
+        {
+          "label": "Température min",
+          "source": "2026-11-09",
+          "pushed": "2026-11-09"
+        },
+        {
+          "label": "Température max",
+          "source": "2026-11-09",
+          "pushed": "2026-11-09"
+        },
+        {
+          "label": "Humidité relative",
+          "source": "2026-10-01",
+          "pushed": "2026-10-01"
+        }
+      ],
+      "last_push": {
+        "run": {
+          "id": "815c8c27-0b70-41b6-8869-d07f28eea9bb",
+          "status": "success",
+          "date": "2026-11-23T20:00:00.427Z",
+          "duration": 136,
+          "trigger": "scheduled",
+          "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/dhis2-climate-push/runs/815c8c27-0b70-41b6-8869-d07f28eea9bb"
+        },
+        "totals": {
+          "imported": 8823,
+          "updated": 1658,
+          "ignored": 3532,
+          "deleted": 0
+        },
+        "summaries": [
+          {
+            "section": "Precipitation",
+            "imported": 1038,
+            "updated": 519,
+            "ignored": 0,
+            "deleted": 0
+          },
+          {
+            "section": "Temperature min",
+            "imported": 3114,
+            "updated": 557,
+            "ignored": 1000,
+            "deleted": 0
+          },
+          {
+            "section": "Temperature max",
+            "imported": 3114,
+            "updated": 582,
+            "ignored": 975,
+            "deleted": 0
+          },
+          {
+            "section": "Relative humidity",
+            "imported": 1557,
+            "updated": 0,
+            "ignored": 1557,
+            "deleted": 0
+          }
+        ],
+        "periods": [
+          "2026-09-01",
+          "2026-10-01",
+          "2026W44",
+          "2026W45",
+          "2026W46"
+        ]
+      },
+      "datasets": [
+        {
+          "slug": "climate-dataset-precipi-6349a3",
+          "name": "Climate_dataset_precipitation",
+          "workspace": "DRC PNLP",
+          "produced_by": "era5-precipitation-aggregate",
+          "latest_version": "ds_2026_11_22_1824",
+          "latest_version_date": "2026-11-22T18:24:00.828Z",
+          "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/datasets/climate-dataset-precipi-6349a3/from/drc-pnlp-ccd423/"
+        },
+        {
+          "slug": "climate-dataset-tempera-39e1f8",
+          "name": "Climate_dataset_temperature",
+          "workspace": "DRC PNLP",
+          "produced_by": "era5-temperature-aggregate",
+          "latest_version": "ds_2026_11_22_1727",
+          "latest_version_date": "2026-11-22T17:27:50.671Z",
+          "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/datasets/climate-dataset-tempera-39e1f8/from/drc-pnlp-ccd423/"
+        }
+      ],
+      "connections": [
+        {
+          "name": "Climate data store",
+          "slug": "climate-data-store",
+          "url": "https://cds.climate.copernicus.eu"
+        },
+        {
+          "name": "DHIS2 - NMDR DRC",
+          "slug": "dhis2-nmdr-drc",
+          "url": "https://nmdr.rdc.implementation.bluesquare.org"
+        }
+      ],
+      "steps": [
+        {
+          "code": "era5-precipitation-extract",
+          "role": "extract",
+          "name": "ERA5 Precipitation Extract",
+          "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/era5-precipitation-extract",
+          "schedule": "0 17 * * 7",
+          "interval_days": 7,
+          "last_run": {
+            "id": "ec6d23f0-3074-4d2a-8c36-40a78436b482",
+            "status": "success",
+            "date": "2026-11-22T17:00:00.453Z",
+            "duration": 166,
+            "trigger": "scheduled",
+            "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/era5-precipitation-extract/runs/ec6d23f0-3074-4d2a-8c36-40a78436b482"
+          },
+          "last_finished_run": {
+            "id": "ec6d23f0-3074-4d2a-8c36-40a78436b482",
+            "status": "success",
+            "date": "2026-11-22T17:00:00.453Z",
+            "duration": 166,
+            "trigger": "scheduled",
+            "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/era5-precipitation-extract/runs/ec6d23f0-3074-4d2a-8c36-40a78436b482"
+          },
+          "last_success": "2026-11-22T17:00:00.453Z",
+          "last_push": null,
+          "evidence": {
+            "no_new_data": false,
+            "new_version": false,
+            "last_update_set": null,
+            "dry_run": null,
+            "error_count": 0,
+            "warning_count": 0,
+            "errors": [],
+            "availability": [],
+            "tables": [],
+            "periods": [],
+            "empty_periods": []
+          },
+          "flags": [],
+          "status": "ok"
+        },
+        {
+          "code": "era5-temperature-extract",
+          "role": "extract",
+          "name": "ERA5 Temperature Extract",
+          "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/era5-temperature-extract",
+          "schedule": "0 16  * * 7",
+          "interval_days": 7,
+          "last_run": {
+            "id": "759e633a-042b-45a2-90a8-0a53fc0362b6",
+            "status": "success",
+            "date": "2026-11-22T16:00:00.471Z",
+            "duration": 221,
+            "trigger": "scheduled",
+            "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/era5-temperature-extract/runs/759e633a-042b-45a2-90a8-0a53fc0362b6"
+          },
+          "last_finished_run": {
+            "id": "759e633a-042b-45a2-90a8-0a53fc0362b6",
+            "status": "success",
+            "date": "2026-11-22T16:00:00.471Z",
+            "duration": 221,
+            "trigger": "scheduled",
+            "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/era5-temperature-extract/runs/759e633a-042b-45a2-90a8-0a53fc0362b6"
+          },
+          "last_success": "2026-11-22T16:00:00.471Z",
+          "last_push": null,
+          "evidence": {
+            "no_new_data": false,
+            "new_version": false,
+            "last_update_set": null,
+            "dry_run": null,
+            "error_count": 0,
+            "warning_count": 0,
+            "errors": [],
+            "availability": [],
+            "tables": [],
+            "periods": [],
+            "empty_periods": []
+          },
+          "flags": [],
+          "status": "ok"
+        },
+        {
+          "code": "era5-humidity-extract",
+          "role": "extract",
+          "name": "ERA5 Humidity Extract",
+          "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/era5-humidity-extract",
+          "schedule": "0 1 5,20 * *",
+          "interval_days": 16,
+          "last_run": {
+            "id": "c826c09c-2cc5-4ced-b70b-0d1285a8fe04",
+            "status": "success",
+            "date": "2026-11-20T01:00:00.478Z",
+            "duration": 91,
+            "trigger": "scheduled",
+            "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/era5-humidity-extract/runs/c826c09c-2cc5-4ced-b70b-0d1285a8fe04"
+          },
+          "last_finished_run": {
+            "id": "c826c09c-2cc5-4ced-b70b-0d1285a8fe04",
+            "status": "success",
+            "date": "2026-11-20T01:00:00.478Z",
+            "duration": 91,
+            "trigger": "scheduled",
+            "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/era5-humidity-extract/runs/c826c09c-2cc5-4ced-b70b-0d1285a8fe04"
+          },
+          "last_success": "2026-11-20T01:00:00.478Z",
+          "last_push": null,
+          "evidence": {
+            "no_new_data": false,
+            "new_version": false,
+            "last_update_set": null,
+            "dry_run": null,
+            "error_count": 0,
+            "warning_count": 0,
+            "errors": [],
+            "availability": [],
+            "tables": [],
+            "periods": [],
+            "empty_periods": []
+          },
+          "flags": [],
+          "status": "ok"
+        },
+        {
+          "code": "era5-precipitation-aggregate",
+          "role": "transform",
+          "name": "ERA5 Precipitation Aggregate",
+          "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/era5-precipitation-aggregate",
+          "schedule": "0 18 * * 7",
+          "interval_days": 7,
+          "last_run": {
+            "id": "aefe6683-369b-45fa-84a2-f0f94e0a28a7",
+            "status": "success",
+            "date": "2026-11-22T18:00:00.461Z",
+            "duration": 1444,
+            "trigger": "scheduled",
+            "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/era5-precipitation-aggregate/runs/aefe6683-369b-45fa-84a2-f0f94e0a28a7"
+          },
+          "last_finished_run": {
+            "id": "aefe6683-369b-45fa-84a2-f0f94e0a28a7",
+            "status": "success",
+            "date": "2026-11-22T18:00:00.461Z",
+            "duration": 1444,
+            "trigger": "scheduled",
+            "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/era5-precipitation-aggregate/runs/aefe6683-369b-45fa-84a2-f0f94e0a28a7"
+          },
+          "last_success": "2026-11-22T18:00:00.461Z",
+          "last_push": null,
+          "evidence": {
+            "no_new_data": false,
+            "new_version": false,
+            "last_update_set": null,
+            "dry_run": null,
+            "error_count": 0,
+            "warning_count": 0,
+            "errors": [],
+            "availability": [],
+            "tables": [],
+            "periods": [],
+            "empty_periods": []
+          },
+          "flags": [],
+          "status": "ok"
+        },
+        {
+          "code": "era5-temperature-aggregate",
+          "role": "transform",
+          "name": "ERA5 Temperature Aggregate",
+          "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/era5-temperature-aggregate",
+          "schedule": "0 17 * * 7",
+          "interval_days": 7,
+          "last_run": {
+            "id": "ed2a0b08-d31c-4f7a-a428-063578958a9f",
+            "status": "success",
+            "date": "2026-11-22T17:00:00.404Z",
+            "duration": 3750,
+            "trigger": "scheduled",
+            "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/era5-temperature-aggregate/runs/ed2a0b08-d31c-4f7a-a428-063578958a9f"
+          },
+          "last_finished_run": {
+            "id": "ed2a0b08-d31c-4f7a-a428-063578958a9f",
+            "status": "success",
+            "date": "2026-11-22T17:00:00.404Z",
+            "duration": 3750,
+            "trigger": "scheduled",
+            "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/era5-temperature-aggregate/runs/ed2a0b08-d31c-4f7a-a428-063578958a9f"
+          },
+          "last_success": "2026-11-22T17:00:00.404Z",
+          "last_push": null,
+          "evidence": {
+            "no_new_data": false,
+            "new_version": false,
+            "last_update_set": null,
+            "dry_run": null,
+            "error_count": 0,
+            "warning_count": 0,
+            "errors": [],
+            "availability": [],
+            "tables": [],
+            "periods": [],
+            "empty_periods": []
+          },
+          "flags": [],
+          "status": "ok"
+        },
+        {
+          "code": "era5-relative-humidity-aggregate",
+          "role": "transform",
+          "name": "ERA5 Humidity Aggregate",
+          "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/era5-relative-humidity-aggregate",
+          "schedule": "0 3 5,20 * *",
+          "interval_days": 16,
+          "last_run": {
+            "id": "a2e43ec6-17d6-42a5-a5f4-4884eae7fae8",
+            "status": "success",
+            "date": "2026-11-20T03:00:00.596Z",
+            "duration": 65,
+            "trigger": "scheduled",
+            "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/era5-relative-humidity-aggregate/runs/a2e43ec6-17d6-42a5-a5f4-4884eae7fae8"
+          },
+          "last_finished_run": {
+            "id": "a2e43ec6-17d6-42a5-a5f4-4884eae7fae8",
+            "status": "success",
+            "date": "2026-11-20T03:00:00.596Z",
+            "duration": 65,
+            "trigger": "scheduled",
+            "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/era5-relative-humidity-aggregate/runs/a2e43ec6-17d6-42a5-a5f4-4884eae7fae8"
+          },
+          "last_success": "2026-11-20T03:00:00.596Z",
+          "last_push": null,
+          "evidence": {
+            "no_new_data": false,
+            "new_version": false,
+            "last_update_set": null,
+            "dry_run": null,
+            "error_count": 0,
+            "warning_count": 0,
+            "errors": [],
+            "availability": [],
+            "tables": [],
+            "periods": [],
+            "empty_periods": []
+          },
+          "flags": [],
+          "status": "ok"
+        },
+        {
+          "code": "dhis2-climate-push",
+          "role": "push",
+          "name": "DHIS2 Climate data push",
+          "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/dhis2-climate-push",
+          "schedule": "0 20 3,13,23 * *",
+          "interval_days": 11,
+          "last_run": {
+            "id": "815c8c27-0b70-41b6-8869-d07f28eea9bb",
+            "status": "success",
+            "date": "2026-11-23T20:00:00.427Z",
+            "duration": 136,
+            "trigger": "scheduled",
+            "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/dhis2-climate-push/runs/815c8c27-0b70-41b6-8869-d07f28eea9bb"
+          },
+          "last_finished_run": {
+            "id": "815c8c27-0b70-41b6-8869-d07f28eea9bb",
+            "status": "success",
+            "date": "2026-11-23T20:00:00.427Z",
+            "duration": 136,
+            "trigger": "scheduled",
+            "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/dhis2-climate-push/runs/815c8c27-0b70-41b6-8869-d07f28eea9bb"
+          },
+          "last_success": "2026-11-23T20:00:00.427Z",
+          "last_push": {
+            "run": {
+              "id": "815c8c27-0b70-41b6-8869-d07f28eea9bb",
+              "status": "success",
+              "date": "2026-11-23T20:00:00.427Z",
+              "duration": 136,
+              "trigger": "scheduled",
+              "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/dhis2-climate-push/runs/815c8c27-0b70-41b6-8869-d07f28eea9bb"
+            },
+            "totals": {
+              "imported": 8823,
+              "updated": 1658,
+              "ignored": 3532,
+              "deleted": 0
+            },
+            "summaries": [
+              {
+                "section": "Precipitation",
+                "imported": 1038,
+                "updated": 519,
+                "ignored": 0,
+                "deleted": 0
+              },
+              {
+                "section": "Temperature min",
+                "imported": 3114,
+                "updated": 557,
+                "ignored": 1000,
+                "deleted": 0
+              },
+              {
+                "section": "Temperature max",
+                "imported": 3114,
+                "updated": 582,
+                "ignored": 975,
+                "deleted": 0
+              },
+              {
+                "section": "Relative humidity",
+                "imported": 1557,
+                "updated": 0,
+                "ignored": 1557,
+                "deleted": 0
+              }
+            ],
+            "periods": [
+              "2026-09-01",
+              "2026-10-01",
+              "2026W44",
+              "2026W45",
+              "2026W46"
+            ]
+          },
+          "evidence": {
+            "no_new_data": false,
+            "new_version": false,
+            "last_update_set": null,
+            "dry_run": false,
+            "error_count": 0,
+            "warning_count": 0,
+            "errors": [],
+            "availability": [
+              {
+                "label": "precipitation",
+                "pushed": "2026-10-26",
+                "available": "2026-11-09"
+              },
+              {
+                "label": "temperature min",
+                "pushed": "2026-10-26",
+                "available": "2026-11-09"
+              },
+              {
+                "label": "temperature max",
+                "pushed": "2026-10-26",
+                "available": "2026-11-09"
+              },
+              {
+                "label": "relative humidity",
+                "pushed": "2026-09-01",
+                "available": "2026-10-01"
+              }
+            ],
+            "tables": [],
+            "periods": [
+              "2026-09-01",
+              "2026-10-01",
+              "2026W44",
+              "2026W45",
+              "2026W46"
+            ],
+            "empty_periods": []
+          },
+          "flags": [],
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "dse",
+      "label": "DSE Palu",
+      "source": "DSE",
+      "status": "error",
+      "flags": [
+        {
+          "level": "error",
+          "message": "Complétude DSE : date d'état dans le futur (2039-11-28) — les pushs suivants sont ignorés. Corriger le fichier d'état."
+        }
+      ],
+      "freshness": [
+        {
+          "label": "Base DSE palu",
+          "source": "2026W46",
+          "pushed": "2026-10-26",
+          "pushed_week": "2026W44"
+        },
+        {
+          "label": "Complétude DSE",
+          "source": "2026W46",
+          "pushed": "2039-11-28",
+          "pushed_week": "2039W48"
+        }
+      ],
+      "last_push": {
+        "run": {
+          "id": "359a9782-2996-48dd-b623-9c6e0877cd3f",
+          "status": "success",
+          "date": "2026-11-22T20:00:00.247Z",
+          "duration": 231,
+          "trigger": "scheduled",
+          "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/dhis2-dse-push/runs/359a9782-2996-48dd-b623-9c6e0877cd3f"
+        },
+        "totals": {
+          "imported": 1998,
+          "updated": 0,
+          "ignored": 79848,
+          "deleted": 0
+        },
+        "summaries": [
+          {
+            "section": "DSE database",
+            "imported": 0,
+            "updated": 0,
+            "ignored": 47,
+            "deleted": 0
+          },
+          {
+            "section": "DSE database",
+            "imported": 1998,
+            "updated": 0,
+            "ignored": 79801,
+            "deleted": 0
+          }
+        ],
+        "periods": []
+      },
+      "datasets": [
+        {
+          "slug": "pnlp-weekly-malaria-dat-4ae811",
+          "name": "PNLP weekly malaria dataset",
+          "workspace": "DRC DSE",
+          "produced_by": "DRC DSE",
+          "latest_version": "2026_week46_2026_11_24_0918",
+          "latest_version_date": "2026-11-24T09:18:10.359Z",
+          "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/datasets/pnlp-weekly-malaria-dat-4ae811/from/drc-dse-0b7712/"
+        }
+      ],
+      "connections": [
+        {
+          "name": "DRC SNIS",
+          "slug": "drc-snis"
+        },
+        {
+          "name": "DHIS2 - NMDR DRC",
+          "slug": "dhis2-nmdr-drc",
+          "url": "https://nmdr.rdc.implementation.bluesquare.org"
+        }
+      ],
+      "steps": [
+        {
+          "code": "pnlp-tables-update",
+          "role": "transform",
+          "name": "PNLP tables update",
+          "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/pnlp-tables-update",
+          "schedule": "0 */3 * * *",
+          "interval_days": 1,
+          "last_run": {
+            "id": "6753b547-dbcc-41e1-95f4-a86e0273bb39",
+            "status": "success",
+            "date": "2026-11-27T09:00:01.383Z",
+            "duration": 121,
+            "trigger": "scheduled",
+            "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/pnlp-tables-update/runs/6753b547-dbcc-41e1-95f4-a86e0273bb39"
+          },
+          "last_finished_run": {
+            "id": "6753b547-dbcc-41e1-95f4-a86e0273bb39",
+            "status": "success",
+            "date": "2026-11-27T09:00:01.383Z",
+            "duration": 121,
+            "trigger": "scheduled",
+            "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/pnlp-tables-update/runs/6753b547-dbcc-41e1-95f4-a86e0273bb39"
+          },
+          "last_success": "2026-11-27T09:00:01.383Z",
+          "last_push": null,
+          "evidence": {
+            "no_new_data": true,
+            "new_version": false,
+            "last_update_set": null,
+            "dry_run": null,
+            "error_count": 0,
+            "warning_count": 0,
+            "errors": [],
+            "availability": [],
+            "tables": [
+              {
+                "table": "DSE_Completude",
+                "year": 2026,
+                "week": 46
+              },
+              {
+                "table": "DSE_palu_for_PNLP",
+                "year": 2025,
+                "week": 52
+              },
+              {
+                "table": "DSE_palu_for_PNLP_2022",
+                "year": 2026,
+                "week": 46
+              },
+              {
+                "table": "DSE_palu_for_PNLP_tot",
+                "year": 2026,
+                "week": 46
+              }
+            ],
+            "periods": [],
+            "empty_periods": []
+          },
+          "flags": [],
+          "status": "ok"
+        },
+        {
+          "code": "dhis2-dse-push",
+          "role": "push",
+          "name": "DHIS2 DSE Palu data push",
+          "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/dhis2-dse-push",
+          "schedule": "0 20 7,22 * *",
+          "interval_days": 16,
+          "last_run": {
+            "id": "359a9782-2996-48dd-b623-9c6e0877cd3f",
+            "status": "success",
+            "date": "2026-11-22T20:00:00.247Z",
+            "duration": 231,
+            "trigger": "scheduled",
+            "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/dhis2-dse-push/runs/359a9782-2996-48dd-b623-9c6e0877cd3f"
+          },
+          "last_finished_run": {
+            "id": "359a9782-2996-48dd-b623-9c6e0877cd3f",
+            "status": "success",
+            "date": "2026-11-22T20:00:00.247Z",
+            "duration": 231,
+            "trigger": "scheduled",
+            "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/dhis2-dse-push/runs/359a9782-2996-48dd-b623-9c6e0877cd3f"
+          },
+          "last_success": "2026-11-22T20:00:00.247Z",
+          "last_push": {
+            "run": {
+              "id": "359a9782-2996-48dd-b623-9c6e0877cd3f",
+              "status": "success",
+              "date": "2026-11-22T20:00:00.247Z",
+              "duration": 231,
+              "trigger": "scheduled",
+              "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/dhis2-dse-push/runs/359a9782-2996-48dd-b623-9c6e0877cd3f"
+            },
+            "totals": {
+              "imported": 1998,
+              "updated": 0,
+              "ignored": 79848,
+              "deleted": 0
+            },
+            "summaries": [
+              {
+                "section": "DSE database",
+                "imported": 0,
+                "updated": 0,
+                "ignored": 47,
+                "deleted": 0
+              },
+              {
+                "section": "DSE database",
+                "imported": 1998,
+                "updated": 0,
+                "ignored": 79801,
+                "deleted": 0
+              }
+            ],
+            "periods": []
+          },
+          "evidence": {
+            "no_new_data": true,
+            "new_version": false,
+            "last_update_set": null,
+            "dry_run": false,
+            "error_count": 0,
+            "warning_count": 0,
+            "errors": [],
+            "availability": [
+              {
+                "label": "DSE database",
+                "pushed": "2026-10-19",
+                "available": "2026-10-26"
+              },
+              {
+                "label": "DSE completude",
+                "pushed": "2039-11-28",
+                "available": "2026-10-26"
+              }
+            ],
+            "tables": [],
+            "periods": [],
+            "empty_periods": []
+          },
+          "flags": [],
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "ewars",
+      "label": "EWARS",
+      "source": "EWARS",
+      "status": "warning",
+      "flags": [
+        {
+          "level": "warning",
+          "message": "DRY_RUN=true dans pipelines/dhis2_ewars_push/config/config_ewars_push.json : les données ne sont pas écrites dans NMDR."
+        }
+      ],
+      "freshness": [
+        {
+          "label": "Formulaires EWARS",
+          "source": "2026-11-15",
+          "pushed": "2026-11-23"
+        }
+      ],
+      "last_push": {
+        "run": {
+          "id": "8b536890-66df-4933-9d8b-e66c6d7fd633",
+          "status": "success",
+          "date": "2026-11-23T00:00:01.840Z",
+          "duration": 363,
+          "trigger": "scheduled",
+          "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/dhis2-ewars-push/runs/8b536890-66df-4933-9d8b-e66c6d7fd633"
+        },
+        "totals": {
+          "imported": 28096,
+          "updated": 0,
+          "ignored": 0,
+          "deleted": 0
+        },
+        "summaries": [
+          {
+            "section": null,
+            "imported": 28096,
+            "updated": 0,
+            "ignored": 0,
+            "deleted": 0
+          }
+        ],
+        "periods": []
+      },
+      "datasets": [],
+      "connections": [
+        {
+          "name": "EWARS",
+          "slug": "ewars",
+          "url": "https://dse.ewars.ws"
+        },
+        {
+          "name": "DRC SNIS",
+          "slug": "drc-snis"
+        },
+        {
+          "name": "DHIS2 - NMDR DRC",
+          "slug": "dhis2-nmdr-drc",
+          "url": "https://nmdr.rdc.implementation.bluesquare.org"
+        }
+      ],
+      "steps": [
+        {
+          "code": "dhis2-ewars-push",
+          "role": "push",
+          "name": "DHIS2 Ewars Push",
+          "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/dhis2-ewars-push",
+          "schedule": "0 0 * * 1",
+          "interval_days": 7,
+          "last_run": {
+            "id": "8b536890-66df-4933-9d8b-e66c6d7fd633",
+            "status": "success",
+            "date": "2026-11-23T00:00:01.840Z",
+            "duration": 363,
+            "trigger": "scheduled",
+            "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/dhis2-ewars-push/runs/8b536890-66df-4933-9d8b-e66c6d7fd633"
+          },
+          "last_finished_run": {
+            "id": "8b536890-66df-4933-9d8b-e66c6d7fd633",
+            "status": "success",
+            "date": "2026-11-23T00:00:01.840Z",
+            "duration": 363,
+            "trigger": "scheduled",
+            "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/dhis2-ewars-push/runs/8b536890-66df-4933-9d8b-e66c6d7fd633"
+          },
+          "last_success": "2026-11-23T00:00:01.840Z",
+          "last_push": {
+            "run": {
+              "id": "8b536890-66df-4933-9d8b-e66c6d7fd633",
+              "status": "success",
+              "date": "2026-11-23T00:00:01.840Z",
+              "duration": 363,
+              "trigger": "scheduled",
+              "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/dhis2-ewars-push/runs/8b536890-66df-4933-9d8b-e66c6d7fd633"
+            },
+            "totals": {
+              "imported": 28096,
+              "updated": 0,
+              "ignored": 0,
+              "deleted": 0
+            },
+            "summaries": [
+              {
+                "section": null,
+                "imported": 28096,
+                "updated": 0,
+                "ignored": 0,
+                "deleted": 0
+              }
+            ],
+            "periods": []
+          },
+          "evidence": {
+            "no_new_data": false,
+            "new_version": false,
+            "last_update_set": null,
+            "dry_run": null,
+            "error_count": 1,
+            "warning_count": 0,
+            "errors": [
+              "Some DHIS2 level 4 ids are duplicated in the pyramid. 30 duplicates found."
+            ],
+            "availability": [],
+            "tables": [],
+            "periods": [],
+            "empty_periods": []
+          },
+          "flags": [
+            {
+              "level": "warning",
+              "message": "1 message(s) d'erreur dans la dernière exécution."
+            }
+          ],
+          "status": "warning"
+        }
+      ]
+    },
+    {
+      "id": "sp",
+      "label": "SP",
+      "source": "DHIS2 SP",
+      "status": "warning",
+      "flags": [
+        {
+          "level": "warning",
+          "message": "Données SP non mises à jour depuis février 2026."
+        },
+        {
+          "level": "warning",
+          "message": "Aucune donnée à la source pour les périodes 202605 à 202610."
+        }
+      ],
+      "freshness": [
+        {
+          "label": "Périodes source",
+          "source": null,
+          "pushed": null
+        }
+      ],
+      "last_push": null,
+      "datasets": [],
+      "connections": [
+        {
+          "name": "dhis2-snis-sp-drc",
+          "slug": "dhis2-snis-sp-drc",
+          "url": "https://sp.snisrdc.com"
+        },
+        {
+          "name": "DHIS2 - NMDR DRC",
+          "slug": "dhis2-nmdr-drc",
+          "url": "https://nmdr.rdc.implementation.bluesquare.org"
+        }
+      ],
+      "steps": [
+        {
+          "code": "dhis2-sp-pnlp-sync",
+          "role": "push",
+          "name": "DHIS2 SP PNLP Sync",
+          "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/dhis2-sp-pnlp-sync",
+          "schedule": "0 5 * * 3",
+          "interval_days": 7,
+          "last_run": {
+            "id": "400b1998-218b-4a9e-be61-81c6a5cdd8a8",
+            "status": "success",
+            "date": "2026-11-25T05:00:00.675Z",
+            "duration": 181,
+            "trigger": "scheduled",
+            "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/dhis2-sp-pnlp-sync/runs/400b1998-218b-4a9e-be61-81c6a5cdd8a8"
+          },
+          "last_finished_run": {
+            "id": "400b1998-218b-4a9e-be61-81c6a5cdd8a8",
+            "status": "success",
+            "date": "2026-11-25T05:00:00.675Z",
+            "duration": 181,
+            "trigger": "scheduled",
+            "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/dhis2-sp-pnlp-sync/runs/400b1998-218b-4a9e-be61-81c6a5cdd8a8"
+          },
+          "last_success": "2026-11-25T05:00:00.675Z",
+          "last_push": null,
+          "evidence": {
+            "no_new_data": false,
+            "new_version": false,
+            "last_update_set": null,
+            "dry_run": false,
+            "error_count": 0,
+            "warning_count": 0,
+            "errors": [],
+            "availability": [],
+            "tables": [],
+            "periods": [],
+            "empty_periods": [
+              "202605",
+              "202606",
+              "202607",
+              "202608",
+              "202609",
+              "202610"
+            ]
+          },
+          "flags": [],
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "snis-analytics",
+      "label": "SNIS Analytics",
+      "source": "SNIS",
+      "status": "ok",
+      "flags": [],
+      "freshness": [
+        {
+          "label": "SNIS Extracts dataset",
+          "source": "SNIS_extract_20261118_0813",
+          "pushed": "20261118_0813"
+        }
+      ],
+      "last_push": {
+        "run": {
+          "id": "aad86642-67ea-422e-bdb9-d4eec570686e",
+          "status": "success",
+          "date": "2026-11-20T01:00:00.688Z",
+          "duration": 845,
+          "trigger": "scheduled",
+          "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/dhis2-pnlp-push-v2/runs/aad86642-67ea-422e-bdb9-d4eec570686e"
+        },
+        "totals": {
+          "imported": 498762,
+          "updated": 69616,
+          "ignored": 0,
+          "deleted": 0
+        },
+        "summaries": [
+          {
+            "section": null,
+            "imported": 826,
+            "updated": 475,
+            "ignored": 0,
+            "deleted": 0
+          },
+          {
+            "section": null,
+            "imported": 884,
+            "updated": 465,
+            "ignored": 0,
+            "deleted": 0
+          },
+          {
+            "section": null,
+            "imported": 1979,
+            "updated": 4572,
+            "ignored": 0,
+            "deleted": 0
+          },
+          {
+            "section": null,
+            "imported": 7041,
+            "updated": 6613,
+            "ignored": 0,
+            "deleted": 0
+          },
+          {
+            "section": null,
+            "imported": 20557,
+            "updated": 12169,
+            "ignored": 0,
+            "deleted": 0
+          },
+          {
+            "section": null,
+            "imported": 467475,
+            "updated": 45322,
+            "ignored": 0,
+            "deleted": 0
+          }
+        ],
+        "periods": [
+          "202605",
+          "202606",
+          "202607",
+          "202608",
+          "202609",
+          "202610"
+        ]
+      },
+      "datasets": [
+        {
+          "slug": "snis-extracts",
+          "name": "SNIS Extracts dataset",
+          "workspace": "DRC DSNIS",
+          "produced_by": "DHIS2 SNIS extract (dhis2-snis-extract) — DRC DSNIS",
+          "latest_version": "SNIS_extract_20261118_0813",
+          "latest_version_date": "2026-11-18T08:13:55.867Z",
+          "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/datasets/snis-extracts/from/drc-dsnis/"
+        }
+      ],
+      "connections": [
+        {
+          "name": "DHIS2 - NMDR DRC",
+          "slug": "dhis2-nmdr-drc",
+          "url": "https://nmdr.rdc.implementation.bluesquare.org"
+        }
+      ],
+      "steps": [
+        {
+          "code": "dhis2-pnlp-push-v2",
+          "role": "push",
+          "name": "DHIS2 PNLP Analytics Push v2",
+          "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/dhis2-pnlp-push-v2",
+          "schedule": "0 1 * * 5",
+          "interval_days": 7,
+          "last_run": {
+            "id": "5b544d85-f95d-4d60-a236-1e31b19947a0",
+            "status": "success",
+            "date": "2026-11-27T01:00:00.574Z",
+            "duration": 25,
+            "trigger": "scheduled",
+            "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/dhis2-pnlp-push-v2/runs/5b544d85-f95d-4d60-a236-1e31b19947a0"
+          },
+          "last_finished_run": {
+            "id": "5b544d85-f95d-4d60-a236-1e31b19947a0",
+            "status": "success",
+            "date": "2026-11-27T01:00:00.574Z",
+            "duration": 25,
+            "trigger": "scheduled",
+            "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/dhis2-pnlp-push-v2/runs/5b544d85-f95d-4d60-a236-1e31b19947a0"
+          },
+          "last_success": "2026-11-27T01:00:00.574Z",
+          "last_push": {
+            "run": {
+              "id": "aad86642-67ea-422e-bdb9-d4eec570686e",
+              "status": "success",
+              "date": "2026-11-20T01:00:00.688Z",
+              "duration": 845,
+              "trigger": "scheduled",
+              "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/dhis2-pnlp-push-v2/runs/aad86642-67ea-422e-bdb9-d4eec570686e"
+            },
+            "totals": {
+              "imported": 498762,
+              "updated": 69616,
+              "ignored": 0,
+              "deleted": 0
+            },
+            "summaries": [
+              {
+                "section": null,
+                "imported": 826,
+                "updated": 475,
+                "ignored": 0,
+                "deleted": 0
+              },
+              {
+                "section": null,
+                "imported": 884,
+                "updated": 465,
+                "ignored": 0,
+                "deleted": 0
+              },
+              {
+                "section": null,
+                "imported": 1979,
+                "updated": 4572,
+                "ignored": 0,
+                "deleted": 0
+              },
+              {
+                "section": null,
+                "imported": 7041,
+                "updated": 6613,
+                "ignored": 0,
+                "deleted": 0
+              },
+              {
+                "section": null,
+                "imported": 20557,
+                "updated": 12169,
+                "ignored": 0,
+                "deleted": 0
+              },
+              {
+                "section": null,
+                "imported": 467475,
+                "updated": 45322,
+                "ignored": 0,
+                "deleted": 0
+              }
+            ],
+            "periods": [
+              "202605",
+              "202606",
+              "202607",
+              "202608",
+              "202609",
+              "202610"
+            ]
+          },
+          "evidence": {
+            "no_new_data": true,
+            "new_version": false,
+            "last_update_set": null,
+            "dry_run": null,
+            "error_count": 0,
+            "warning_count": 0,
+            "errors": [],
+            "availability": [],
+            "tables": [],
+            "periods": [],
+            "empty_periods": []
+          },
+          "flags": [],
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "snis-data-elements",
+      "label": "SNIS Data elements",
+      "source": "SNIS",
+      "status": "ok",
+      "flags": [],
+      "freshness": [
+        {
+          "label": "SNIS Data elements extracts dataset",
+          "source": "SNIS_DE_extract_20261125_1130",
+          "pushed": "20261125_1130"
+        }
+      ],
+      "last_push": {
+        "run": {
+          "id": "416ece4b-f72d-4508-a1ce-ae791b73e37f",
+          "status": "success",
+          "date": "2026-11-26T02:00:01.098Z",
+          "duration": 236,
+          "trigger": "scheduled",
+          "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/dhis2-data-elements-sync-v2/runs/416ece4b-f72d-4508-a1ce-ae791b73e37f"
+        },
+        "totals": {
+          "imported": 110568,
+          "updated": 725,
+          "ignored": 0,
+          "deleted": 0
+        },
+        "summaries": [
+          {
+            "section": null,
+            "imported": 0,
+            "updated": 5,
+            "ignored": 0,
+            "deleted": 0
+          },
+          {
+            "section": null,
+            "imported": 92,
+            "updated": 12,
+            "ignored": 0,
+            "deleted": 0
+          },
+          {
+            "section": null,
+            "imported": 200,
+            "updated": 100,
+            "ignored": 0,
+            "deleted": 0
+          },
+          {
+            "section": null,
+            "imported": 478,
+            "updated": 74,
+            "ignored": 0,
+            "deleted": 0
+          },
+          {
+            "section": null,
+            "imported": 1513,
+            "updated": 272,
+            "ignored": 0,
+            "deleted": 0
+          },
+          {
+            "section": null,
+            "imported": 108284,
+            "updated": 262,
+            "ignored": 0,
+            "deleted": 0
+          },
+          {
+            "section": null,
+            "imported": 1,
+            "updated": 0,
+            "ignored": 0,
+            "deleted": 0
+          }
+        ],
+        "periods": [
+          "202605",
+          "202606",
+          "202607",
+          "202608",
+          "202609",
+          "202610"
+        ]
+      },
+      "datasets": [
+        {
+          "slug": "snis-data-elements-extracts",
+          "name": "SNIS Data elements extracts dataset",
+          "workspace": "DRC DSNIS",
+          "produced_by": "DHIS2 SNIS data elements extract (dhis2-snis-data-elements-extract) — DRC DSNIS",
+          "latest_version": "SNIS_DE_extract_20261125_1130",
+          "latest_version_date": "2026-11-25T11:30:30.409Z",
+          "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/datasets/snis-data-elements-extracts/from/drc-dsnis/"
+        }
+      ],
+      "connections": [
+        {
+          "name": "DHIS2 - NMDR DRC",
+          "slug": "dhis2-nmdr-drc",
+          "url": "https://nmdr.rdc.implementation.bluesquare.org"
+        }
+      ],
+      "steps": [
+        {
+          "code": "dhis2-data-elements-sync-v2",
+          "role": "push",
+          "name": "DHIS2 SNIS Analytics Extract Sync 2025-01 v2",
+          "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/dhis2-data-elements-sync-v2",
+          "schedule": "0 2 * * 4",
+          "interval_days": 7,
+          "last_run": {
+            "id": "416ece4b-f72d-4508-a1ce-ae791b73e37f",
+            "status": "success",
+            "date": "2026-11-26T02:00:01.098Z",
+            "duration": 236,
+            "trigger": "scheduled",
+            "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/dhis2-data-elements-sync-v2/runs/416ece4b-f72d-4508-a1ce-ae791b73e37f"
+          },
+          "last_finished_run": {
+            "id": "416ece4b-f72d-4508-a1ce-ae791b73e37f",
+            "status": "success",
+            "date": "2026-11-26T02:00:01.098Z",
+            "duration": 236,
+            "trigger": "scheduled",
+            "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/dhis2-data-elements-sync-v2/runs/416ece4b-f72d-4508-a1ce-ae791b73e37f"
+          },
+          "last_success": "2026-11-26T02:00:01.098Z",
+          "last_push": {
+            "run": {
+              "id": "416ece4b-f72d-4508-a1ce-ae791b73e37f",
+              "status": "success",
+              "date": "2026-11-26T02:00:01.098Z",
+              "duration": 236,
+              "trigger": "scheduled",
+              "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/dhis2-data-elements-sync-v2/runs/416ece4b-f72d-4508-a1ce-ae791b73e37f"
+            },
+            "totals": {
+              "imported": 110568,
+              "updated": 725,
+              "ignored": 0,
+              "deleted": 0
+            },
+            "summaries": [
+              {
+                "section": null,
+                "imported": 0,
+                "updated": 5,
+                "ignored": 0,
+                "deleted": 0
+              },
+              {
+                "section": null,
+                "imported": 92,
+                "updated": 12,
+                "ignored": 0,
+                "deleted": 0
+              },
+              {
+                "section": null,
+                "imported": 200,
+                "updated": 100,
+                "ignored": 0,
+                "deleted": 0
+              },
+              {
+                "section": null,
+                "imported": 478,
+                "updated": 74,
+                "ignored": 0,
+                "deleted": 0
+              },
+              {
+                "section": null,
+                "imported": 1513,
+                "updated": 272,
+                "ignored": 0,
+                "deleted": 0
+              },
+              {
+                "section": null,
+                "imported": 108284,
+                "updated": 262,
+                "ignored": 0,
+                "deleted": 0
+              },
+              {
+                "section": null,
+                "imported": 1,
+                "updated": 0,
+                "ignored": 0,
+                "deleted": 0
+              }
+            ],
+            "periods": [
+              "202605",
+              "202606",
+              "202607",
+              "202608",
+              "202609",
+              "202610"
+            ]
+          },
+          "evidence": {
+            "no_new_data": false,
+            "new_version": true,
+            "last_update_set": "20261125_1130",
+            "dry_run": false,
+            "error_count": 0,
+            "warning_count": 9,
+            "errors": [],
+            "availability": [],
+            "tables": [],
+            "periods": [
+              "202605",
+              "202606",
+              "202607",
+              "202608",
+              "202609",
+              "202610"
+            ],
+            "empty_periods": []
+          },
+          "flags": [],
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "snis-sentinel",
+      "label": "SNIS Sites sentinelles",
+      "source": "SNIS",
+      "status": "ok",
+      "flags": [],
+      "freshness": [
+        {
+          "label": "SNIS Sentinel dataset",
+          "source": "SNIS_SENTINEL_extract_20261125_1431",
+          "pushed": "20261125_1431"
+        }
+      ],
+      "last_push": {
+        "run": {
+          "id": "ef1606d1-a084-436b-bf87-1337ee3eb44c",
+          "status": "success",
+          "date": "2026-11-26T01:00:00.564Z",
+          "duration": 65,
+          "trigger": "scheduled",
+          "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/dhis2-snis-sentinel-pnlp-sync-v2/runs/ef1606d1-a084-436b-bf87-1337ee3eb44c"
+        },
+        "totals": {
+          "imported": 194,
+          "updated": 0,
+          "ignored": 0,
+          "deleted": 0
+        },
+        "summaries": [
+          {
+            "section": null,
+            "imported": 93,
+            "updated": 0,
+            "ignored": 0,
+            "deleted": 0
+          },
+          {
+            "section": null,
+            "imported": 101,
+            "updated": 0,
+            "ignored": 0,
+            "deleted": 0
+          }
+        ],
+        "periods": [
+          "202610"
+        ]
+      },
+      "datasets": [
+        {
+          "slug": "snis-sentinel-dataset",
+          "name": "SNIS Sentinel dataset",
+          "workspace": "DRC DSNIS",
+          "produced_by": "DHIS2 SNIS sentinel extract (dhis2-snis-sentinel-extract) — DRC DSNIS",
+          "latest_version": "SNIS_SENTINEL_extract_20261125_1431",
+          "latest_version_date": "2026-11-25T14:31:01.601Z",
+          "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/datasets/snis-sentinel-dataset/from/drc-dsnis/"
+        }
+      ],
+      "connections": [
+        {
+          "name": "DHIS2 - NMDR DRC",
+          "slug": "dhis2-nmdr-drc",
+          "url": "https://nmdr.rdc.implementation.bluesquare.org"
+        }
+      ],
+      "steps": [
+        {
+          "code": "dhis2-snis-sentinel-pnlp-sync-v2",
+          "role": "push",
+          "name": "DHIS2 Sentinel PNLP Sync v2",
+          "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/dhis2-snis-sentinel-pnlp-sync-v2",
+          "schedule": "0 1 * * 4",
+          "interval_days": 7,
+          "last_run": {
+            "id": "ef1606d1-a084-436b-bf87-1337ee3eb44c",
+            "status": "success",
+            "date": "2026-11-26T01:00:00.564Z",
+            "duration": 65,
+            "trigger": "scheduled",
+            "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/dhis2-snis-sentinel-pnlp-sync-v2/runs/ef1606d1-a084-436b-bf87-1337ee3eb44c"
+          },
+          "last_finished_run": {
+            "id": "ef1606d1-a084-436b-bf87-1337ee3eb44c",
+            "status": "success",
+            "date": "2026-11-26T01:00:00.564Z",
+            "duration": 65,
+            "trigger": "scheduled",
+            "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/dhis2-snis-sentinel-pnlp-sync-v2/runs/ef1606d1-a084-436b-bf87-1337ee3eb44c"
+          },
+          "last_success": "2026-11-26T01:00:00.564Z",
+          "last_push": {
+            "run": {
+              "id": "ef1606d1-a084-436b-bf87-1337ee3eb44c",
+              "status": "success",
+              "date": "2026-11-26T01:00:00.564Z",
+              "duration": 65,
+              "trigger": "scheduled",
+              "url": "https://app.openhexa.org/workspaces/drc-pnlp-ccd423/pipelines/dhis2-snis-sentinel-pnlp-sync-v2/runs/ef1606d1-a084-436b-bf87-1337ee3eb44c"
+            },
+            "totals": {
+              "imported": 194,
+              "updated": 0,
+              "ignored": 0,
+              "deleted": 0
+            },
+            "summaries": [
+              {
+                "section": null,
+                "imported": 93,
+                "updated": 0,
+                "ignored": 0,
+                "deleted": 0
+              },
+              {
+                "section": null,
+                "imported": 101,
+                "updated": 0,
+                "ignored": 0,
+                "deleted": 0
+              }
+            ],
+            "periods": [
+              "202610"
+            ]
+          },
+          "evidence": {
+            "no_new_data": true,
+            "new_version": true,
+            "last_update_set": "20261125_1431",
+            "dry_run": false,
+            "error_count": 0,
+            "warning_count": 0,
+            "errors": [],
+            "availability": [],
+            "tables": [],
+            "periods": [
+              "202610"
+            ],
+            "empty_periods": []
+          },
+          "flags": [],
+          "status": "ok"
+        }
+      ]
+    }
+  ]
+}
